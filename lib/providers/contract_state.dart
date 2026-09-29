@@ -1,26 +1,271 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart' show FieldPath, QuerySnapshot;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/question_bank.dart';
 import '../models/questionnaire.dart';
+import '../services/cloud_sync.dart';
+import '../services/phone.dart';
 import '../widgets/common_widgets.dart';
 
 /// حالة محرك الاستبانة: بنك الأسئلة وجلسات إعداد العقود.
-/// تُحفظ كل عملية فور حدوثها حتى لا يضيع التقدم عند انقطاع الجلسة.
+/// يعمل بوضعين:
+/// - محلي: جهاز واحد، والجلسات محفوظة على الجهاز.
+/// - خادم (Firebase): كل شريك يصوّت ويوقّع من جواله، والأصوات تُزامَن لحظياً.
+/// في وضع الخادم تُشتق حالة كل بند من الأصوات نفسها، فلا يحدث تعارض بين الأجهزة.
 class ContractState extends ChangeNotifier {
   static const _sessionsKey = 'contract_sessions_v1';
   static const _customBankKey = 'custom_bank_v1';
 
   final List<BankQuestion> _customQuestions = [];
+  final Map<String, BankQuestion> _remoteQuestions = {};
   List<ContractSession> sessions = [];
   bool loaded = false;
 
   List<BankQuestion> get bank => [...seedQuestionBank, ..._customQuestions];
 
-  BankQuestion question(String id) => bank.firstWhere((q) => q.id == id);
+  BankQuestion question(String id) =>
+      bank.where((q) => q.id == id).firstOrNull ?? _remoteQuestions[id]!;
+
+  // ───────────── وضع الخادم ─────────────
+
+  CloudSync? _cloud;
+  String? myPhone;
+  String? _myUid;
+  StreamSubscription? _sessionsSub;
+  final Map<String, StreamSubscription> _voteSubs = {};
+  final Map<String, StreamSubscription> _signSubs = {};
+  final Map<String, Map<String, dynamic>> _docs = {};
+  final Map<String, List<Map<String, dynamic>>> _votes = {};
+  final Map<String, List<Map<String, dynamic>>> _signs = {};
+
+  bool get isCloud => _cloud != null;
+
+  /// هل يستطيع مستخدم هذا الجهاز التصويت أو التوقيع باسم هذا الشريك؟
+  bool canActAs(SessionPartner p) => !isCloud || normalizePhone(p.phone) == myPhone;
+
+  Future<void> attachCloud(CloudSync cloud, {required String phone, required String uid}) async {
+    await detachCloud();
+    _cloud = cloud;
+    myPhone = phone;
+    _myUid = uid;
+    sessions = [];
+    loaded = false;
+    notifyListeners();
+    _sessionsSub = cloud.mySessions(phone).listen(_onSessions, onError: (e) {
+      debugPrint('تعذر قراءة الجلسات من الخادم: $e');
+      loaded = true;
+      notifyListeners();
+    });
+  }
+
+  Future<void> detachCloud() async {
+    await _sessionsSub?.cancel();
+    for (final s in [..._voteSubs.values, ..._signSubs.values]) {
+      await s.cancel();
+    }
+    _voteSubs.clear();
+    _signSubs.clear();
+    _docs.clear();
+    _votes.clear();
+    _signs.clear();
+    _cloud = null;
+    myPhone = null;
+    _myUid = null;
+  }
+
+  void _onSessions(QuerySnapshot<Map<String, dynamic>> snap) {
+    final ids = snap.docs.map((d) => d.id).toSet();
+    for (final gone in _docs.keys.where((k) => !ids.contains(k)).toList()) {
+      _docs.remove(gone);
+      _voteSubs.remove(gone)?.cancel();
+      _signSubs.remove(gone)?.cancel();
+    }
+    for (final d in snap.docs) {
+      _docs[d.id] = d.data();
+      _voteSubs.putIfAbsent(
+        d.id,
+        () => _cloud!.votes(d.id).listen((v) {
+          _votes[d.id] = v.docs.map((e) => e.data()).toList();
+          _rebuildAll();
+        }),
+      );
+      _signSubs.putIfAbsent(
+        d.id,
+        () => _cloud!.signoffs(d.id).listen((v) {
+          _signs[d.id] = v.docs.map((e) => {...e.data(), 'partnerId': e.id}).toList();
+          _rebuildAll();
+        }),
+      );
+    }
+    loaded = true;
+    _rebuildAll();
+  }
+
+  void _rebuildAll() {
+    sessions = _docs.entries
+        .map((e) => sessionFromRemote(e.key, e.value, _votes[e.key] ?? const [], _signs[e.key] ?? const []))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    notifyListeners();
+  }
+
+  /// تحويل الجلسة إلى مستند Firestore
+  Map<String, dynamic> sessionToRemote(ContractSession s, {required String uid}) {
+    final phones = {for (final p in s.partners) p.id: normalizePhone(p.phone)};
+    final used = s.records.map((r) => r.questionId).toSet();
+    return {
+      'companyName': s.companyName,
+      'companyType': s.companyType,
+      'currency': s.currency.name,
+      'capital': s.capital,
+      'partners': s.partners.map((p) => {...p.toJson(), 'phone': phones[p.id]}).toList(),
+      'partnerPhones': phones,
+      'memberPhones': phones.values.toSet().toList(),
+      'records': {for (final r in s.records) r.key: _recordToRemote(r)},
+      // البنود المضافة يدوياً تُرفق بالجلسة حتى تظهر على أجهزة بقية الشركاء
+      'customQuestions': _customQuestions.where((q) => used.contains(q.id)).map((q) => q.toJson()).toList(),
+      'status': s.status.name,
+      'sittings': s.sittings,
+      'witnesses': s.witnesses.map((w) => w.toJson()).toList(),
+      'createdAt': s.createdAt.toUtc().toIso8601String(),
+      'updatedAt': s.updatedAt.toUtc().toIso8601String(),
+      'completedAt': null,
+      'contentHash': null,
+      'createdBy': uid,
+    };
+  }
+
+  Map<String, dynamic> _recordToRemote(ClauseRecord r) => {
+        'questionId': r.questionId,
+        'concernedPartnerId': r.concernedPartnerId,
+        'value': r.value,
+        'round': r.round,
+        'flag': switch (r.status) {
+          ClauseStatus.deferred => 'deferred',
+          ClauseStatus.neutralized => 'neutralized',
+          _ => 'none',
+        },
+        'flagAt': r.status == ClauseStatus.neutralized ? r.resolvedAt?.toUtc().toIso8601String() : null,
+      };
+
+  /// بناء الجلسة من مستند الخادم وأصواته وتواقيعه.
+  /// حالة البند = المؤجل/المحيّد إن وُجد، وإلا تُحسب من أصوات الجولة الحالية.
+  ContractSession sessionFromRemote(
+    String id,
+    Map<String, dynamic> d,
+    List<Map<String, dynamic>> votes,
+    List<Map<String, dynamic>> signs,
+  ) {
+    for (final q in (d['customQuestions'] as List? ?? [])) {
+      final bq = BankQuestion.fromJson(Map<String, dynamic>.from(q as Map));
+      _remoteQuestions[bq.id] = bq;
+    }
+    final partners = (d['partners'] as List)
+        .map((p) => SessionPartner.fromJson(Map<String, dynamic>.from(p as Map)))
+        .toList();
+    final recs = Map<String, dynamic>.from(d['records'] as Map);
+    final s = ContractSession(
+      id: id,
+      companyName: d['companyName'] as String,
+      companyType: d['companyType'] as String,
+      currency: AppCurrency.values.byName(d['currency'] as String),
+      capital: (d['capital'] as num).toDouble(),
+      partners: partners,
+      records: [],
+      status: SessionStatus.values.byName(d['status'] as String),
+      createdAt: remoteTime(d['createdAt']),
+      updatedAt: remoteTime(d['updatedAt']),
+      sittings: (d['sittings'] as num?)?.toInt() ?? 1,
+      witnesses: (d['witnesses'] as List? ?? [])
+          .map((w) => Witness.fromJson(Map<String, dynamic>.from(w as Map)))
+          .toList(),
+      completedAt: d['completedAt'] == null ? null : remoteTime(d['completedAt']),
+      contentHash: d['contentHash'] as String?,
+    );
+
+    // ترتيب البنود كما في بنك الأسئلة، ثم البنود الخاصة بترتيب الشركاء
+    final order = <String>[];
+    for (final q in [...bank, ..._remoteQuestions.values]) {
+      if (q.scope == ClauseScope.private) {
+        order.addAll(partners.map((p) => '${q.id}:${p.id}'));
+      } else {
+        order.add(q.id);
+      }
+    }
+    final keys = recs.keys.toList()
+      ..sort((a, b) {
+        final ia = order.indexOf(a), ib = order.indexOf(b);
+        return (ia < 0 ? 1 << 20 : ia).compareTo(ib < 0 ? 1 << 20 : ib);
+      });
+
+    for (final key in keys) {
+      final m = Map<String, dynamic>.from(recs[key] as Map);
+      final r = ClauseRecord(
+        key: key,
+        questionId: m['questionId'] as String,
+        concernedPartnerId: m['concernedPartnerId'] as String?,
+        value: (m['value'] as num?)?.toDouble(),
+        round: (m['round'] as num?)?.toInt() ?? 1,
+      );
+      for (final v in votes) {
+        if ((v['round'] as num?)?.toInt() != r.round) continue;
+        final pid = v['partnerId'] as String;
+        if (v['recordKey'] == key) {
+          r.votes[pid] = PartnerVote(
+            partnerId: pid,
+            ballot: Ballot.values.byName(v['ballot'] as String),
+            at: remoteTime(v['at']),
+            method: ConfirmMethod.values.byName(v['method'] as String),
+          );
+        } else if (v['recordKey'] == neutralKey(key)) {
+          r.neutralConsents.add(pid);
+        }
+      }
+      switch (m['flag']) {
+        case 'deferred':
+          r.status = ClauseStatus.deferred;
+        case 'neutralized':
+          r.status = ClauseStatus.neutralized;
+          r.resolvedAt = m['flagAt'] == null ? null : remoteTime(m['flagAt']);
+        default:
+          s.records.add(r); // مؤقتاً لحساب النصاب
+          final res = quorum(s, r);
+          s.records.removeLast();
+          if (res.complete) {
+            r.status = res.passed ? ClauseStatus.agreed : ClauseStatus.rejected;
+            r.resolvedAt = r.votes.values.map((v) => v.at).reduce((a, b) => a.isAfter(b) ? a : b);
+          }
+      }
+      s.records.add(r);
+    }
+
+    for (final so in signs) {
+      final pid = so['partnerId'] as String;
+      s.signOffs[pid] = PartnerSignOff(
+        partnerId: pid,
+        signaturePng: so['signaturePng'] as String,
+        at: remoteTime(so['at']),
+        method: ConfirmMethod.values.byName(so['method'] as String),
+      );
+    }
+    return s;
+  }
+
+  static String neutralKey(String key) => 'N~$key';
+
+  void _remote(ContractSession s, Map<Object, Object?> fields) {
+    _cloud?.update(s.id, fields).catchError((Object e) => debugPrint('تعذر حفظ التعديل في الخادم: $e'));
+  }
+
+  void _remoteRecord(ContractSession s, ClauseRecord r) =>
+      _remote(s, {FieldPath(['records', r.key]): _recordToRemote(r)});
+
+  // ───────────── التخزين المحلي ─────────────
 
   Future<void> load() async {
     try {
@@ -33,7 +278,7 @@ class ContractState extends ChangeNotifier {
               .map((e) => BankQuestion.fromJson(e as Map<String, dynamic>)));
       }
       final raw = prefs.getString(_sessionsKey);
-      if (raw != null) {
+      if (raw != null && !isCloud) {
         sessions = (jsonDecode(raw) as List)
             .map((e) => ContractSession.fromJson(e as Map<String, dynamic>))
             .toList();
@@ -41,17 +286,19 @@ class ContractState extends ChangeNotifier {
     } catch (e) {
       debugPrint('تعذر تحميل الجلسات المحفوظة: $e');
     }
-    loaded = true;
+    if (!isCloud) loaded = true;
     notifyListeners();
   }
 
   Future<void> _persist() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _sessionsKey,
-        jsonEncode(sessions.map((s) => s.toJson()).toList()),
-      );
+      if (!isCloud) {
+        await prefs.setString(
+          _sessionsKey,
+          jsonEncode(sessions.map((s) => s.toJson()).toList()),
+        );
+      }
       await prefs.setString(
         _customBankKey,
         jsonEncode(_customQuestions.map((q) => q.toJson()).toList()),
@@ -126,12 +373,18 @@ class ContractState extends ChangeNotifier {
       updatedAt: now,
     );
     sessions.insert(0, s);
+    if (isCloud) {
+      _cloud!
+          .create(s.id, sessionToRemote(s, uid: _myUid!))
+          .catchError((Object e) => debugPrint('تعذر إنشاء الجلسة في الخادم: $e'));
+    }
     _touch(s);
     return s;
   }
 
   void deleteSession(ContractSession s) {
     sessions.remove(s);
+    _cloud?.delete(s.id).catchError((Object e) => debugPrint('تعذر حذف الجلسة: $e'));
     notifyListeners();
     _persist();
   }
@@ -188,7 +441,35 @@ class ContractState extends ChangeNotifier {
       r.status = ClauseStatus.pending;
       r.resolvedAt = null;
     }
+    _cloud
+        ?.vote(
+          sid: s.id,
+          recordKey: r.key,
+          partnerId: partnerId,
+          round: r.round,
+          ballot: ballot.name,
+          method: method.name,
+          phone: myPhone!,
+        )
+        .catchError((Object e) => debugPrint('تعذر تسجيل الصوت في الخادم: $e'));
     _touch(s);
+  }
+
+  /// موافقة شريك على تحييد البند (وضع الخادم: يوافق كل شريك من جواله)
+  void consentNeutralize(ContractSession s, ClauseRecord r, String partnerId, ConfirmMethod method) {
+    r.neutralConsents.add(partnerId);
+    _cloud
+        ?.vote(
+          sid: s.id,
+          recordKey: neutralKey(r.key),
+          partnerId: partnerId,
+          round: r.round,
+          ballot: Ballot.agree.name,
+          method: method.name,
+          phone: myPhone!,
+        )
+        .catchError((Object e) => debugPrint('تعذر تسجيل الموافقة في الخادم: $e'));
+    notifyListeners();
   }
 
   /// تعديل القيمة المقترحة يلغي الأصوات السابقة لأنها كانت على قيمة مختلفة
@@ -201,6 +482,7 @@ class ContractState extends ChangeNotifier {
     }
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
+    _remoteRecord(s, r);
     _touch(s);
   }
 
@@ -209,12 +491,14 @@ class ContractState extends ChangeNotifier {
     r.round++;
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
+    _remoteRecord(s, r);
     _touch(s);
   }
 
   void defer(ContractSession s, ClauseRecord r) {
     r.status = ClauseStatus.deferred;
     r.resolvedAt = null;
+    _remoteRecord(s, r);
     _touch(s);
   }
 
@@ -224,6 +508,7 @@ class ContractState extends ChangeNotifier {
     r.round++;
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
+    _remoteRecord(s, r);
     _touch(s);
   }
 
@@ -231,11 +516,13 @@ class ContractState extends ChangeNotifier {
   void neutralize(ContractSession s, ClauseRecord r) {
     r.status = ClauseStatus.neutralized;
     r.resolvedAt = DateTime.now();
+    _remoteRecord(s, r);
     _touch(s);
   }
 
   void suspend(ContractSession s) {
     s.status = SessionStatus.suspended;
+    _remote(s, {'status': s.status.name});
     _touch(s);
   }
 
@@ -243,6 +530,7 @@ class ContractState extends ChangeNotifier {
     if (s.status == SessionStatus.suspended) {
       s.status = SessionStatus.active;
       s.sittings++;
+      _remote(s, {'status': s.status.name, 'sittings': s.sittings});
       _touch(s);
     }
   }
@@ -250,36 +538,57 @@ class ContractState extends ChangeNotifier {
   void markAwaitingSignature(ContractSession s) {
     if (s.allResolved && s.status != SessionStatus.completed) {
       s.status = SessionStatus.awaitingSignature;
+      _remote(s, {'status': s.status.name});
       _touch(s);
     }
   }
 
   void signOff(ContractSession s, PartnerSignOff so) {
     s.signOffs[so.partnerId] = so;
+    _cloud
+        ?.signOff(
+          sid: s.id,
+          partnerId: so.partnerId,
+          signaturePng: so.signaturePng,
+          method: so.method.name,
+          phone: myPhone!,
+        )
+        .catchError((Object e) => debugPrint('تعذر حفظ التوقيع في الخادم: $e'));
     _touch(s);
   }
 
   void setWitnesses(ContractSession s, List<Witness> w) {
     s.witnesses = w;
+    _remote(s, {'witnesses': w.map((x) => x.toJson()).toList()});
     _touch(s);
   }
 
+  /// الاعتماد النهائي: تُحسب البصمة وتُحفظ في الخادم، وبعدها يُقفل العقد بقواعد الأمان
   void complete(ContractSession s) {
     s.status = SessionStatus.completed;
-    s.completedAt = DateTime.now();
+    s.completedAt = DateTime.now().toUtc();
     s.contentHash = computeHash(s);
+    _remote(s, {
+      'status': s.status.name,
+      'completedAt': s.completedAt!.toIso8601String(),
+      'contentHash': s.contentHash,
+    });
     _touch(s);
   }
 
   /// المحتوى القانوني للعقد بترتيب ثابت: البنود بنصها النهائي، الأصوات، التواقيع، الشهود.
   /// التواقيع تدخل ببصمتها لا بصورتها حتى يبقى المحتوى خفيفاً.
+  /// الأوقات بتوقيت UTC حتى تتطابق البصمة على أجهزة في مناطق زمنية مختلفة.
   String canonicalContent(ContractSession s) {
     String digest(String? v) => v == null ? '' : sha256.convert(utf8.encode(v)).toString();
+    String t(DateTime d) => d.toUtc().toIso8601String();
     final sortedSign = s.signOffs.keys.toList()..sort();
     return jsonEncode({
       'id': s.id,
       'company': [s.companyName, s.companyType, s.currency.code, s.capital],
-      'partners': s.partners.map((p) => [p.id, p.name, p.nationalId, p.phone, p.equity]).toList(),
+      'partners': s.partners
+          .map((p) => [p.id, p.name, p.nationalId, normalizePhone(p.phone), p.equity])
+          .toList(),
       'clauses': s.records.map((r) {
         final voteIds = r.votes.keys.toList()..sort();
         return [
@@ -289,16 +598,16 @@ class ContractState extends ChangeNotifier {
           r.status == ClauseStatus.agreed ? renderClause(s, r) : null,
           voteIds.map((id) {
             final v = r.votes[id]!;
-            return [id, v.ballot.name, v.at.toIso8601String(), v.method.name];
+            return [id, v.ballot.name, t(v.at), v.method.name];
           }).toList(),
         ];
       }).toList(),
       'signOffs': sortedSign.map((id) {
         final so = s.signOffs[id]!;
-        return [id, digest(so.signaturePng), so.at.toIso8601String(), so.method.name];
+        return [id, digest(so.signaturePng), t(so.at), so.method.name];
       }).toList(),
       'witnesses': s.witnesses.map((w) => [w.name, w.nationalId, w.internal, digest(w.signaturePng)]).toList(),
-      'completedAt': s.completedAt?.toIso8601String(),
+      'completedAt': s.completedAt == null ? null : t(s.completedAt!),
     });
   }
 
@@ -359,5 +668,11 @@ class ContractState extends ChangeNotifier {
       out.add('إذا كان ${rule.fieldLabel}$threshold: ${rule.action}');
     }
     return out;
+  }
+
+  @override
+  void dispose() {
+    detachCloud();
+    super.dispose();
   }
 }

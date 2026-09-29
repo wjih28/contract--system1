@@ -70,11 +70,14 @@ class FinalizeScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (so == null && !completed)
+                  if (so == null && !completed && state.canActAs(p))
                     TextButton(
                       onPressed: () => _signPartner(context, s, p),
                       child: const Text('توقيع'),
-                    ),
+                    )
+                  else if (so == null && !completed)
+                    const Text('يوقّع من جواله',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
                 ],
               ),
             );

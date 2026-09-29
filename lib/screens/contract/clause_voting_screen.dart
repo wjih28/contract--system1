@@ -112,7 +112,8 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
                   ...voters.map((p) => _PartnerBallotRow(
                         partner: p,
                         vote: r.votes[p.id],
-                        enabled: open,
+                        enabled: open && state.canActAs(p),
+                        waitingRemote: open && !state.canActAs(p) && r.votes[p.id] == null,
                         onVote: (b) async {
                           final m = await IdentityService.confirm(
                             context,
@@ -411,12 +412,14 @@ class _PartnerBallotRow extends StatelessWidget {
   final SessionPartner partner;
   final PartnerVote? vote;
   final bool enabled;
+  final bool waitingRemote; // الشريك يصوّت من جواله ولم يصل صوته بعد
   final ValueChanged<Ballot> onVote;
   const _PartnerBallotRow({
     required this.partner,
     required this.vote,
     required this.enabled,
     required this.onVote,
+    this.waitingRemote = false,
   });
 
   @override
@@ -466,6 +469,16 @@ class _PartnerBallotRow extends StatelessWidget {
                             style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
                       ],
                     ),
+                  ],
+                )
+              else if (waitingRemote)
+                const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.phone_iphone_rounded, size: 14, color: AppColors.textMuted),
+                    SizedBox(width: 4),
+                    Text('بانتظار تصويته من جواله',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
                   ],
                 ),
             ],
@@ -654,10 +667,11 @@ class _Outcome extends StatelessWidget {
     }
   }
 
-  /// التحييد يتطلب تأكيد كل شريك على حدة
+  /// التحييد يتطلب تأكيد كل شريك على حدة.
+  /// في وضع الخادم يوافق كل شريك من جواله، وتظهر الموافقات هنا لحظياً.
   Future<void> _neutralize(BuildContext context) async {
     final state = context.read<ContractState>();
-    final confirmed = <String>{};
+    final localConfirmed = <String>{};
     await showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.navySurface,
@@ -665,9 +679,14 @@ class _Outcome extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => StatefulBuilder(
+      builder: (ctx) => ListenableBuilder(
+        listenable: state,
+        builder: (ctx, _) => StatefulBuilder(
         builder: (ctx, setSheet) {
-          final all = session.partners.where((p) => p.equity > 0).toList();
+          final s = state.sessions.where((x) => x.id == session.id).firstOrNull ?? session;
+          final rec = s.records.where((x) => x.key == record.key).firstOrNull ?? record;
+          final confirmed = state.isCloud ? rec.neutralConsents : localConfirmed;
+          final all = s.partners.where((p) => p.equity > 0).toList();
           final done = all.every((p) => confirmed.contains(p.id));
           return Padding(
             padding: const EdgeInsets.fromLTRB(22, 22, 22, 30),
@@ -694,21 +713,29 @@ class _Outcome extends StatelessWidget {
                     title: Text(p.name, style: const TextStyle(color: AppColors.textPrimary)),
                     trailing: ok
                         ? null
-                        : TextButton(
-                            onPressed: () async {
-                              final m = await IdentityService.confirm(ctx,
-                                  partnerName: p.name, action: 'الموافقة على تحييد البند');
-                              if (m != null) setSheet(() => confirmed.add(p.id));
-                            },
-                            child: const Text('أوافق'),
-                          ),
+                        : !state.canActAs(p)
+                            ? const Text('من جواله',
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5))
+                            : TextButton(
+                                onPressed: () async {
+                                  final m = await IdentityService.confirm(ctx,
+                                      partnerName: p.name, action: 'الموافقة على تحييد البند');
+                                  if (m == null) return;
+                                  if (state.isCloud) {
+                                    state.consentNeutralize(s, rec, p.id, m);
+                                  } else {
+                                    setSheet(() => localConfirmed.add(p.id));
+                                  }
+                                },
+                                child: const Text('أوافق'),
+                              ),
                   );
                 }),
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: done
                       ? () {
-                          state.neutralize(session, record);
+                          state.neutralize(s, rec);
                           Navigator.pop(ctx);
                         }
                       : null,
@@ -718,6 +745,7 @@ class _Outcome extends StatelessWidget {
             ),
           );
         },
+        ),
       ),
     );
   }

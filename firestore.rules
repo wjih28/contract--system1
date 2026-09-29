@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// قواعد أمان ميثاق:
+// - لا يقرأ الجلسة إلا أعضاؤها (أرقام جوالات الشركاء).
+// - كل شريك يصوّت ويوقّع باسمه فقط، والتحقق عبر رقم الجوال المؤكد بكود SMS.
+// - جدول الشركاء لا يتغير بعد إنشاء الجلسة.
+// - العقد المكتمل يُقفل نهائياً، فلا تتغير بصمته ولا محتواه.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.phone_number != null;
+    }
+
+    function myPhone() {
+      return request.auth.token.phone_number;
+    }
+
+    function sessionData(sid) {
+      return get(/databases/$(database)/documents/sessions/$(sid)).data;
+    }
+
+    function isMember(sid) {
+      return signedIn() && myPhone() in sessionData(sid).memberPhones;
+    }
+
+    function isOpen(sid) {
+      return sessionData(sid).status != 'completed';
+    }
+
+    // الشريك صاحب هذا الرقم هو فقط من يكتب باسمه
+    function actsAs(sid, partnerId) {
+      return sessionData(sid).partnerPhones[partnerId] == myPhone();
+    }
+
+    match /sessions/{sid} {
+      allow read: if signedIn() && myPhone() in resource.data.memberPhones;
+
+      allow create: if signedIn()
+        && myPhone() in request.resource.data.memberPhones
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'active'
+        && request.resource.data.contentHash == null;
+
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && resource.data.status != 'completed'
+        && request.resource.data.partners == resource.data.partners
+        && request.resource.data.partnerPhones == resource.data.partnerPhones
+        && request.resource.data.memberPhones == resource.data.memberPhones
+        && request.resource.data.createdBy == resource.data.createdBy
+        // الاعتماد النهائي يشترط تسجيل بصمة SHA-256 كاملة
+        && (request.resource.data.status != 'completed'
+            || (request.resource.data.contentHash is string
+                && request.resource.data.contentHash.size() == 64));
+
+      // الحذف لمنشئ الجلسة فقط وقبل اعتماد العقد
+      allow delete: if signedIn()
+        && resource.data.createdBy == request.auth.uid
+        && resource.data.status != 'completed';
+
+      match /votes/{voteId} {
+        allow read: if isMember(sid);
+        allow create, update: if isMember(sid)
+          && isOpen(sid)
+          && actsAs(sid, request.resource.data.partnerId)
+          && request.resource.data.phone == myPhone()
+          && voteId == request.resource.data.recordKey + '__' + request.resource.data.partnerId
+          && request.resource.data.ballot in ['agree', 'disagree', 'neutral']
+          && request.resource.data.at == request.time;
+        allow delete: if false;
+      }
+
+      match /signoffs/{partnerId} {
+        allow read: if isMember(sid);
+        allow create: if isMember(sid)
+          && isOpen(sid)
+          && actsAs(sid, partnerId)
+          && request.resource.data.phone == myPhone()
+          && request.resource.data.at == request.time;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

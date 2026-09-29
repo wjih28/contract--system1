@@ -2,6 +2,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mithaq_app/models/questionnaire.dart';
 import 'package:mithaq_app/providers/contract_state.dart';
+import 'package:mithaq_app/services/phone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -18,9 +19,9 @@ void main() {
       currency: AppCurrency.usd,
       capital: 100000,
       partners: const [
-        SessionPartner(id: 'a', name: 'أحمد', nationalId: '1', phone: '', equity: 60),
-        SessionPartner(id: 'b', name: 'بكر', nationalId: '2', phone: '', equity: 30),
-        SessionPartner(id: 'c', name: 'جمال', nationalId: '3', phone: '', equity: 10),
+        SessionPartner(id: 'a', name: 'أحمد', nationalId: '1', phone: '771000001', equity: 60),
+        SessionPartner(id: 'b', name: 'بكر', nationalId: '2', phone: '771000002', equity: 30),
+        SessionPartner(id: 'c', name: 'جمال', nationalId: '3', phone: '771000003', equity: 10),
       ],
     );
   });
@@ -95,6 +96,44 @@ void main() {
     // العبث بقيمة سقف الصرف بعد الاعتماد يكسر البصمة
     s.records.firstWhere((r) => r.key == 'F02').value = 999999;
     expect(state.verifyHash(s), isFalse);
+  });
+
+  test('وضع الخادم: حالة البند تُشتق من أصوات الجولة الحالية فقط', () {
+    final doc = state.sessionToRemote(s, uid: 'u1');
+    expect(doc['memberPhones'], hasLength(3));
+    // جولة ثانية على F02: الأصوات القديمة من الجولة الأولى تُهمل
+    (doc['records'] as Map)['F02']['round'] = 2;
+    (doc['records'] as Map)['L03']['flag'] = 'deferred';
+    Map<String, dynamic> v(String key, String pid, String ballot, int round) => {
+          'recordKey': key,
+          'partnerId': pid,
+          'ballot': ballot,
+          'round': round,
+          'method': 'biometric',
+          'at': '2026-09-29T10:00:00Z',
+        };
+    final votes = [
+      v('F02', 'a', 'disagree', 1),
+      v('F02', 'a', 'agree', 2),
+      v('F02', 'b', 'agree', 2),
+      v('F02', 'c', 'neutral', 2),
+      v('L01', 'a', 'agree', 1),
+      v(ContractState.neutralKey('L02'), 'b', 'agree', 1),
+    ];
+    final r = state.sessionFromRemote('X', doc, votes, const []);
+    ClauseRecord rec(String k) => r.records.firstWhere((x) => x.key == k);
+    expect(rec('F02').status, ClauseStatus.agreed); // 90% ≥ الثلثين
+    expect(rec('F02').votes['a']?.ballot, Ballot.agree);
+    expect(rec('L01').status, ClauseStatus.pending); // صوت واحد من ثلاثة
+    expect(rec('L03').status, ClauseStatus.deferred);
+    expect(rec('L02').neutralConsents, {'b'});
+    expect(r.records.map((x) => x.key).first, 'L01'); // ترتيب البنود محفوظ
+  });
+
+  test('توحيد أرقام الجوال اليمنية', () {
+    expect(normalizePhone('0771 234 567'), '+967771234567');
+    expect(normalizePhone('00967771234567'), '+967771234567');
+    expect(normalizePhone('+966 50 123 4567'), '+966501234567');
   });
 
   test('الجلسة تُحفظ وتُستعاد بعد إعادة التحميل', () async {

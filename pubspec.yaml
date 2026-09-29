@@ -43,6 +43,9 @@ dependencies:
   printing: ^5.15.1
   local_auth: ^3.0.2
   crypto: ^3.0.7
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  cloud_firestore: ^6.10.0
 
 dev_dependencies:
   flutter_test:

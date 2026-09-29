@@ -327,6 +327,9 @@ class ClauseRecord {
   Map<String, PartnerVote> votes;
   DateTime? resolvedAt;
 
+  /// الشركاء الذين وافقوا على تحييد البند في الجولة الحالية (وضع الخادم)
+  Set<String> neutralConsents = {};
+
   ClauseRecord({
     required this.key,
     required this.questionId,

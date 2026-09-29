@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../models/questionnaire.dart';
 import '../../providers/app_state.dart';
 import '../../providers/contract_state.dart';
+import '../../services/phone.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'session_overview_screen.dart';
@@ -55,6 +56,15 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
   @override
   void initState() {
     super.initState();
+    final cloud = context.read<ContractState>();
+    if (cloud.isCloud) {
+      // وضع الخادم: يبدأ الجدول بمنشئ الجلسة برقم جواله المؤكد
+      _partners.addAll([
+        _PartnerDraft('p1', ph: cloud.myPhone ?? ''),
+        _PartnerDraft('p2'),
+      ]);
+      return;
+    }
     // تعبئة مبدئية من شركاء المنصة لتسريع التجربة، ويمكن تعديلها
     final existing = context.read<AppState>().partners.where((p) => p.equityPercentage > 0);
     for (final p in existing) {
@@ -94,6 +104,22 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       return;
     }
     final state = context.read<ContractState>();
+    final phones = _partners.map((p) => normalizePhone(p.phone.text)).toList();
+    if (state.isCloud) {
+      // كل شريك يدخل برقم جواله، لذا الرقم إلزامي وغير مكرر، ويجب أن يكون منشئ الجلسة أحدهم
+      if (phones.any((p) => p.length < 10)) {
+        _snack('أدخل رقم جوال صحيح لكل شريك، فكل شريك يصوّت من جواله');
+        return;
+      }
+      if (phones.toSet().length != phones.length) {
+        _snack('لا يجوز تكرار رقم الجوال لأكثر من شريك');
+        return;
+      }
+      if (!phones.contains(state.myPhone)) {
+        _snack('يجب أن تكون أحد الشركاء: أضف رقم جوالك ${state.myPhone} في الجدول');
+        return;
+      }
+    }
     final s = state.createSession(
       companyName: _company.text.trim(),
       companyType: _type,
@@ -104,7 +130,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                 id: p.id,
                 name: p.name.text.trim(),
                 nationalId: p.nationalId.text.trim(),
-                phone: p.phone.text.trim(),
+                phone: normalizePhone(p.phone.text),
                 equity: double.parse(p.equity.text.trim()),
               ))
           .toList(),
