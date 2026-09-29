@@ -139,12 +139,23 @@ class SessionOverviewScreen extends StatelessWidget {
                 ),
               ],
             ),
-          ] else
+          ] else ...[
             ElevatedButton.icon(
               onPressed: () => ContractPdf.share(state, s, interim: false),
               icon: const Icon(Icons.picture_as_pdf_rounded),
               label: const Text('عرض العقد النهائي PDF'),
             ),
+            if (s.contentHash != null) ...[
+              const SizedBox(height: 12),
+              _Banner(
+                color: state.verifyHash(s) ? AppColors.success : AppColors.danger,
+                icon: state.verifyHash(s) ? Icons.lock_rounded : Icons.lock_open_rounded,
+                text: state.verifyHash(s)
+                    ? 'العقد محمي ببصمة رقمية ومطابق لما اعتُمد: ${s.contentHash!.substring(0, 16)}…'
+                    : 'تحذير: محتوى العقد تغيّر بعد اعتماده ولا يطابق البصمة الرقمية',
+              ),
+            ],
+          ],
           const SizedBox(height: 24),
           ...ClauseCategory.values.map((c) {
             final items = s.records

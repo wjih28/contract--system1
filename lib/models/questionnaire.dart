@@ -492,6 +492,9 @@ class ContractSession {
   Map<String, PartnerSignOff> signOffs;
   DateTime? completedAt;
 
+  /// بصمة SHA-256 لمحتوى العقد المعتمد؛ أي تعديل لاحق يغيّرها
+  String? contentHash;
+
   ContractSession({
     required this.id,
     required this.companyName,
@@ -507,6 +510,7 @@ class ContractSession {
     List<Witness>? witnesses,
     Map<String, PartnerSignOff>? signOffs,
     this.completedAt,
+    this.contentHash,
   })  : witnesses = witnesses ?? [],
         signOffs = signOffs ?? {};
 
@@ -537,6 +541,7 @@ class ContractSession {
         'witnesses': witnesses.map((w) => w.toJson()).toList(),
         'signOffs': signOffs.map((k, v) => MapEntry(k, v.toJson())),
         'completedAt': completedAt?.toIso8601String(),
+        'contentHash': contentHash,
       };
 
   factory ContractSession.fromJson(Map<String, dynamic> j) => ContractSession(
@@ -565,6 +570,7 @@ class ContractSession {
         completedAt: j['completedAt'] == null
             ? null
             : DateTime.parse(j['completedAt'] as String),
+        contentHash: j['contentHash'] as String?,
       );
 }
 

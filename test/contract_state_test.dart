@@ -82,6 +82,21 @@ void main() {
     expect(state.generatedRules(s), isNotEmpty);
   });
 
+  test('بصمة العقد تثبت عند الاعتماد وتتغير بأي تعديل', () {
+    for (final r in s.records) {
+      for (final p in state.voters(s, r)) {
+        state.castVote(s, r, p.id, Ballot.agree, ConfirmMethod.manual);
+      }
+    }
+    state.complete(s);
+    expect(s.contentHash, hasLength(64));
+    expect(state.verifyHash(s), isTrue);
+
+    // العبث بقيمة سقف الصرف بعد الاعتماد يكسر البصمة
+    s.records.firstWhere((r) => r.key == 'F02').value = 999999;
+    expect(state.verifyHash(s), isFalse);
+  });
+
   test('الجلسة تُحفظ وتُستعاد بعد إعادة التحميل', () async {
     state.castVote(s, rec('L01'), 'a', Ballot.agree, ConfirmMethod.biometric);
     state.suspend(s);

@@ -87,7 +87,9 @@ class ContractPdf {
         footer: (ctx) => pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Text('رقم المستند ${s.id} · صدر ${_dt.format(now)}',
+            pw.Text(
+                'رقم المستند ${s.id} · صدر ${_dt.format(now)}'
+                '${!interim && s.contentHash != null ? ' · البصمة ${s.contentHash!.substring(0, 16)}' : ''}',
                 style: const pw.TextStyle(color: _muted, fontSize: 8)),
             pw.Text('صفحة ${ctx.pageNumber} من ${ctx.pagesCount}',
                 style: const pw.TextStyle(color: _muted, fontSize: 8)),
@@ -208,6 +210,48 @@ class ContractPdf {
                           png: w.signaturePng,
                         ))
                     .toList(),
+              ),
+            ],
+            if (s.contentHash != null) ...[
+              pw.SizedBox(height: 16),
+              _heading('التحقق من سلامة العقد'),
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          'تُحسب البصمة الرقمية (SHA-256) من نصوص البنود المعتمدة والأصوات والتواقيع والشهود لحظة الاعتماد. أي تعديل لاحق على محتوى العقد، ولو حرفاً واحداً، ينتج بصمة مختلفة.',
+                          style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 3),
+                        ),
+                        pw.SizedBox(height: 6),
+                        pw.Text(
+                          state.verifyHash(s)
+                              ? 'الحالة: المحتوى مطابق للبصمة المعتمدة'
+                              : 'تحذير: المحتوى الحالي لا يطابق البصمة المعتمدة',
+                          style: pw.TextStyle(
+                            fontSize: 10,
+                            fontWeight: pw.FontWeight.bold,
+                            color: state.verifyHash(s) ? PdfColors.green800 : PdfColors.red800,
+                          ),
+                        ),
+                        pw.SizedBox(height: 6),
+                        pw.Text(s.contentHash!,
+                            textDirection: pw.TextDirection.ltr,
+                            style: const pw.TextStyle(fontSize: 7.5, color: _navy)),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(width: 12),
+                  pw.BarcodeWidget(
+                    barcode: pw.Barcode.qrCode(),
+                    data: 'MITHAQ|${s.id}|${s.contentHash}',
+                    width: 80,
+                    height: 80,
+                  ),
+                ],
               ),
             ],
           ] else

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -266,8 +267,47 @@ class ContractState extends ChangeNotifier {
   void complete(ContractSession s) {
     s.status = SessionStatus.completed;
     s.completedAt = DateTime.now();
+    s.contentHash = computeHash(s);
     _touch(s);
   }
+
+  /// المحتوى القانوني للعقد بترتيب ثابت: البنود بنصها النهائي، الأصوات، التواقيع، الشهود.
+  /// التواقيع تدخل ببصمتها لا بصورتها حتى يبقى المحتوى خفيفاً.
+  String canonicalContent(ContractSession s) {
+    String digest(String? v) => v == null ? '' : sha256.convert(utf8.encode(v)).toString();
+    final sortedSign = s.signOffs.keys.toList()..sort();
+    return jsonEncode({
+      'id': s.id,
+      'company': [s.companyName, s.companyType, s.currency.code, s.capital],
+      'partners': s.partners.map((p) => [p.id, p.name, p.nationalId, p.phone, p.equity]).toList(),
+      'clauses': s.records.map((r) {
+        final voteIds = r.votes.keys.toList()..sort();
+        return [
+          r.key,
+          r.status.name,
+          r.value,
+          r.status == ClauseStatus.agreed ? renderClause(s, r) : null,
+          voteIds.map((id) {
+            final v = r.votes[id]!;
+            return [id, v.ballot.name, v.at.toIso8601String(), v.method.name];
+          }).toList(),
+        ];
+      }).toList(),
+      'signOffs': sortedSign.map((id) {
+        final so = s.signOffs[id]!;
+        return [id, digest(so.signaturePng), so.at.toIso8601String(), so.method.name];
+      }).toList(),
+      'witnesses': s.witnesses.map((w) => [w.name, w.nationalId, w.internal, digest(w.signaturePng)]).toList(),
+      'completedAt': s.completedAt?.toIso8601String(),
+    });
+  }
+
+  String computeHash(ContractSession s) =>
+      sha256.convert(utf8.encode(canonicalContent(s))).toString();
+
+  /// يتحقق من أن محتوى العقد المعتمد لم يتغير منذ اعتماده
+  bool verifyHash(ContractSession s) =>
+      s.contentHash != null && s.contentHash == computeHash(s);
 
   /// أول بند لم يُحسم بعد (يتخطى المؤجل)
   int nextPendingIndex(ContractSession s, {int from = 0}) {
