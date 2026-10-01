@@ -12,7 +12,9 @@ import '../company/partners_screen.dart';
 import '../contract/new_session_screen.dart';
 import '../contract/question_bank_screen.dart';
 import '../contracts_screen.dart';
-import '../dashboard_screen.dart';
+import '../company/my_companies_screen.dart';
+import '../company/partner_dashboard_screen.dart';
+import '../establishment/voting_center_screen.dart';
 import '../dispute_room_screen.dart';
 import '../notifications_screen.dart';
 import '../profile_screen.dart';
@@ -132,14 +134,10 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _pageFor(AppModule m) => switch (m) {
-        AppModule.dashboard => const _Demo(child: DashboardScreen()),
+        AppModule.dashboard => const PartnerDashboardScreen(),
         AppModule.partners => const PartnersScreen(),
         AppModule.establishment => const ContractsScreen(),
-        AppModule.voting => const _Upcoming(
-            title: 'مركز التصويت',
-            message: 'يجمع كل القرارات المطلوب تصويتك عليها مع مهلها ونصابها. يُبنى في المرحلة 1، '
-                'والتصويت متاح الآن من داخل جلسة التأسيس.',
-          ),
+        AppModule.voting => const VotingCenterScreen(),
         AppModule.approvals => const _Upcoming(
             title: 'الموافقات والاستثناءات',
             message: 'مراجعة طلبات الاستثناء لمرة واحدة دون تغيير العقد. تُبنى في المرحلة 2.',
@@ -186,6 +184,8 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
         onSelected: (v) {
           if (v == '_new') {
             Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSessionScreen()));
+          } else if (v == '_all') {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const MyCompaniesScreen()));
           } else {
             cs.select(v);
           }
@@ -202,6 +202,14 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
               ]),
             ),
           const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: '_all',
+            child: Row(children: [
+              Icon(Icons.apartment_rounded, size: 18, color: AppColors.gold),
+              SizedBox(width: 8),
+              Text('كل شركاتي'),
+            ]),
+          ),
           const PopupMenuItem(
             value: '_new',
             child: Row(children: [

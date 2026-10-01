@@ -60,6 +60,22 @@ class ContractState extends ChangeNotifier {
   List<ContractSession> sessionsFor(String? companyId) =>
       sessions.where((s) => s.companyId == companyId).toList();
 
+  /// جلسة التأسيس للشركة (واحدة لكل شركة)
+  ContractSession? establishmentFor(String? companyId) =>
+      companyId == null ? null : sessions.where((s) => s.companyId == companyId).firstOrNull;
+
+  /// البنود المفتوحة التي تنتظر صوت هذا الشريك (لم يصوّت بعد)
+  List<ClauseRecord> pendingFor(ContractSession s, String partnerId) => s.records
+      .where((r) =>
+          r.status == ClauseStatus.pending &&
+          !r.votes.containsKey(partnerId) &&
+          voters(s, r).any((p) => p.id == partnerId))
+      .toList();
+
+  /// البنود التي بدأ التصويت عليها ولم تُحسم بعد
+  List<ClauseRecord> openDecisions(ContractSession s) =>
+      s.records.where((r) => r.status == ClauseStatus.pending && r.openedAt != null).toList();
+
   static const _sessionsKey = 'contract_sessions_v1';
   static const _customBankKey = 'custom_bank_v1';
 
