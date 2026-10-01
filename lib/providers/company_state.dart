@@ -199,14 +199,21 @@ class CompanyState extends ChangeNotifier {
       companyType: companyType,
       currency: currency,
       capital: capital,
-      members: members.map((m) => CompanyMember(
-            id: m.id,
-            name: m.name,
-            phone: m.phone.isEmpty ? '' : normalizePhone(m.phone),
-            nationalId: m.nationalId,
-            roles: m.roles,
-            equity: m.equity,
-          )).toList(),
+      members: [
+        for (var i = 0; i < members.length; i++)
+          CompanyMember(
+            id: members[i].id,
+            name: members[i].name,
+            phone: members[i].phone.isEmpty ? '' : normalizePhone(members[i].phone),
+            nationalId: members[i].nationalId,
+            // منشئ الشركة يحصل على دور مسؤول النظام لضبط الإعدادات (يُدار لاحقاً من شاشة الصلاحيات)
+            roles: {
+              ...members[i].roles,
+              if (_isCreator(members[i], i)) CompanyRole.systemAdmin,
+            },
+            equity: members[i].equity,
+          ),
+      ],
       createdAt: now,
       createdBy: myUid,
     );
@@ -234,6 +241,27 @@ class CompanyState extends ChangeNotifier {
           (_) {},
           onError: (Object e) => debugPrint('تعذر تحديث إصدار العقد: $e'),
         );
+    notifyListeners();
+    _persist();
+  }
+
+  bool _isCreator(CompanyMember m, int index) =>
+      isCloud ? (m.phone.isNotEmpty && normalizePhone(m.phone) == myPhone) : index == 0;
+
+  /// A11: تعديل إعدادات التصويت للشركة؛ تسري على الجلسات الجديدة فقط
+  void updateVotingSettings(String companyId, VotingSettings v) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null) return;
+    c.votingSettings = v;
+    _db?.collection('companies').doc(companyId).update({'votingSettings': v.toJson()}).then(
+          (_) {},
+          onError: (Object e) => debugPrint('تعذر حفظ إعدادات التصويت: $e'),
+        );
+    log(companyId,
+        action: 'تعديل إعدادات التصويت',
+        objectType: 'settings',
+        objectId: 'voting',
+        result: 'النصاب ${v.quorum}%، المهلة ${v.deadlineDays} أيام، الجمود بعد ${v.deadlockAfter} جولات');
     notifyListeners();
     _persist();
   }

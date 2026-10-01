@@ -148,6 +148,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       currency: company.currency,
       capital: company.capital,
       partners: company.partners.map((m) => m.toSessionPartner()).toList(),
+      settings: company.votingSettings,
     );
     Navigator.pushReplacement(
       context,
@@ -207,7 +208,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                 foregroundColor: AppColors.textSecondary,
                 side: const BorderSide(color: AppColors.divider),
               ),
-              segments: AppCurrency.values
+              segments: context.watch<ContractState>().enabledCurrencies
                   .map((c) => ButtonSegment(
                         value: c,
                         label: Text('${c.label} (${c.code})'),

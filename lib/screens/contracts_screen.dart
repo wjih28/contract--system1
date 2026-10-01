@@ -36,6 +36,7 @@ class ContractsScreen extends StatelessWidget {
                   currency: company.currency,
                   capital: company.capital,
                   partners: company.partners.map((m) => m.toSessionPartner()).toList(),
+                  settings: company.votingSettings,
                 );
                 Navigator.push(
                   context,

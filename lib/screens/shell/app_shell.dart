@@ -9,6 +9,10 @@ import '../../providers/contract_state.dart';
 import '../establishment/witness_tasks_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../admin/clause_library_screen.dart';
+import '../admin/currency_settings_screen.dart';
+import '../admin/logic_rules_screen.dart';
+import '../admin/voting_settings_screen.dart';
 import '../company/audit_log_screen.dart';
 import '../company/partners_screen.dart';
 import '../contract/new_session_screen.dart';
@@ -155,6 +159,10 @@ class _AppShellState extends State<AppShell> {
         AppModule.notifications => const _Demo(child: NotificationsScreen()),
         AppModule.profile => const ProfileScreen(),
         AppModule.questionBank => const QuestionBankScreen(),
+        AppModule.clauseLibrary => const ClauseLibraryScreen(),
+        AppModule.logicRules => const LogicRulesScreen(),
+        AppModule.votingSettings => const VotingSettingsScreen(),
+        AppModule.currencySettings => const CurrencySettingsScreen(),
         AppModule.auditLog => const AuditLogScreen(),
         AppModule.operationsDashboard => const _Upcoming(
             title: 'لوحة التشغيل',

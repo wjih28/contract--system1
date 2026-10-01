@@ -41,7 +41,9 @@ void main() {
     expect(c.members.first.phone, '+967771000001'); // توحيد الرقم
     expect(companies.current?.id, c.id);
     expect(companies.audit, hasLength(1));
-    expect(companies.myRoles, {CompanyRole.managingPartner}); // محلياً: المستخدم هو أول عضو
+    // محلياً: المستخدم هو أول عضو، ومنشئ الشركة يحصل على دور مسؤول النظام
+    expect(companies.myRoles, {CompanyRole.managingPartner, CompanyRole.systemAdmin});
+    expect(c.members[1].roles, {CompanyRole.partner});
 
     final s = contracts.createSession(
       companyId: c.id,

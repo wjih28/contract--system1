@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/governance_config.dart';
 import '../../models/questionnaire.dart';
 import '../../providers/contract_state.dart';
 import '../../theme/app_theme.dart';
@@ -53,12 +54,27 @@ class QuestionBankScreen extends StatelessWidget {
                                         color: AppColors.textPrimary, fontWeight: FontWeight.w700)),
                                 const SizedBox(height: 3),
                                 Text(
-                                  '${q.scope.label} · ${q.quorum.display} · ${q.effect.label}'
+                                  '${q.id} · ${q.scope.label} · ${q.quorum.display} · ${q.effect.label}'
                                   '${q.rule != null ? ' · شرط ${q.rule!.op.symbol}' : ''}',
                                   style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                                 ),
+                                if (state.conditions[q.id] != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 3),
+                                    child: Text(
+                                      state.conditions[q.id]!.describe(
+                                          state.question(state.conditions[q.id]!.sourceQuestionId).title),
+                                      style: const TextStyle(color: AppColors.info, fontSize: 11),
+                                    ),
+                                  ),
                               ],
                             ),
+                          ),
+                          IconButton(
+                            tooltip: 'شرط الظهور',
+                            onPressed: () => _editCondition(context, q),
+                            icon: Icon(Icons.call_split_rounded,
+                                color: state.conditions[q.id] != null ? AppColors.info : AppColors.textMuted),
                           ),
                           if (q.custom)
                             IconButton(
@@ -75,6 +91,125 @@ class QuestionBankScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// A07: شرط ظهور السؤال بناءً على نتيجة سؤال آخر، مع التحقق من الاعتماد الدائري
+  Future<void> _editCondition(BuildContext context, BankQuestion q) async {
+    final state = context.read<ContractState>();
+    final cur = state.conditions[q.id];
+    String? source = cur?.sourceQuestionId;
+    var kind = cur?.kind ?? ConditionKind.agreed;
+    var op = cur?.op ?? ComparisonOp.gt;
+    final value = TextEditingController(text: cur?.value?.toString() ?? '');
+    String? error;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.navySurface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) {
+          final src = source == null ? null : state.question(source!);
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('شرط ظهور: ${q.title}',
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                const Text('يظهر السؤال في الجلسة فقط إذا تحقق الشرط، وإلا يُعد "غير منطبق" ولا يدخل في العقد.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  initialValue: source,
+                  isExpanded: true,
+                  dropdownColor: AppColors.navySurface,
+                  decoration: const InputDecoration(labelText: 'السؤال المصدر'),
+                  items: state.bank
+                      .where((x) => x.id != q.id && x.scope == ClauseScope.general)
+                      .map((x) => DropdownMenuItem(value: x.id, child: Text('${x.id} · ${x.title}', overflow: TextOverflow.ellipsis)))
+                      .toList(),
+                  onChanged: (v) => set(() => source = v),
+                ),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, children: [
+                  ChoiceChip(label: const Text('إذا اعتُمد'), selected: kind == ConditionKind.agreed,
+                      onSelected: (_) => set(() => kind = ConditionKind.agreed)),
+                  ChoiceChip(label: const Text('إذا لم يُعتمد'), selected: kind == ConditionKind.notAgreed,
+                      onSelected: (_) => set(() => kind = ConditionKind.notAgreed)),
+                  if (src != null && src.paramKind != ParamKind.none)
+                    ChoiceChip(label: const Text('حسب قيمته'), selected: kind == ConditionKind.valueCompare,
+                        onSelected: (_) => set(() => kind = ConditionKind.valueCompare)),
+                ]),
+                if (kind == ConditionKind.valueCompare) ...[
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    DropdownButton<ComparisonOp>(
+                      value: op,
+                      dropdownColor: AppColors.navySurface,
+                      items: ComparisonOp.values.map((o) => DropdownMenuItem(value: o, child: Text(o.label))).toList(),
+                      onChanged: (v) => set(() => op = v!),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: value,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'القيمة', isDense: true),
+                      ),
+                    ),
+                  ]),
+                ],
+                if (error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(error!, style: const TextStyle(color: AppColors.danger)),
+                ],
+                const SizedBox(height: 16),
+                Row(children: [
+                  if (cur != null)
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          state.setCondition(q.id, null);
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('إزالة الشرط'),
+                      ),
+                    ),
+                  if (cur != null) const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: source == null
+                          ? null
+                          : () {
+                              final err = state.setCondition(
+                                q.id,
+                                QuestionCondition(
+                                  sourceQuestionId: source!,
+                                  kind: kind,
+                                  op: kind == ConditionKind.valueCompare ? op : null,
+                                  value: kind == ConditionKind.valueCompare ? double.tryParse(value.text.trim()) : null,
+                                ),
+                              );
+                              if (err != null) {
+                                set(() => error = err);
+                              } else {
+                                Navigator.pop(ctx);
+                              }
+                            },
+                      child: const Text('حفظ الشرط'),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    value.dispose();
   }
 }
 

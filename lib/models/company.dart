@@ -76,6 +76,10 @@ enum AppModule {
   profile,
   // إدارة النظام
   questionBank,
+  clauseLibrary,
+  logicRules,
+  votingSettings,
+  currencySettings,
   auditLog,
   // التشغيل
   operationsDashboard,
@@ -95,6 +99,10 @@ extension AppModuleX on AppModule {
         AppModule.notifications => 'الإشعارات',
         AppModule.profile => 'حسابي',
         AppModule.questionBank => 'بنك الأسئلة',
+        AppModule.clauseLibrary => 'مكتبة البنود',
+        AppModule.logicRules => 'القواعد المنطقية',
+        AppModule.votingSettings => 'التصويت والنصاب',
+        AppModule.currencySettings => 'العملات',
         AppModule.auditLog => 'سجل التدقيق',
         AppModule.operationsDashboard => 'لوحة التشغيل',
         AppModule.professionalTasks => 'مهامي المهنية',
@@ -111,6 +119,10 @@ extension AppModuleX on AppModule {
         AppModule.notifications => Icons.notifications_active_rounded,
         AppModule.profile => Icons.person_rounded,
         AppModule.questionBank => Icons.library_books_rounded,
+        AppModule.clauseLibrary => Icons.menu_book_rounded,
+        AppModule.logicRules => Icons.account_tree_rounded,
+        AppModule.votingSettings => Icons.tune_rounded,
+        AppModule.currencySettings => Icons.currency_exchange_rounded,
         AppModule.auditLog => Icons.manage_search_rounded,
         AppModule.operationsDashboard => Icons.insights_rounded,
         AppModule.professionalTasks => Icons.assignment_rounded,
@@ -120,7 +132,13 @@ extension AppModuleX on AppModule {
   bool get shared => this == AppModule.profile || this == AppModule.auditLog || this == AppModule.notifications;
 
   Portal get portal => switch (this) {
-        AppModule.questionBank || AppModule.auditLog => Portal.admin,
+        AppModule.questionBank ||
+        AppModule.clauseLibrary ||
+        AppModule.logicRules ||
+        AppModule.votingSettings ||
+        AppModule.currencySettings ||
+        AppModule.auditLog =>
+          Portal.admin,
         AppModule.operationsDashboard => Portal.operations,
         AppModule.professionalTasks => Portal.professional,
         _ => Portal.partner,
@@ -156,8 +174,22 @@ class Permissions {
       AppModule.profile,
       AppModule.auditLog,
     },
-    CompanyRole.systemAdmin: {AppModule.questionBank, AppModule.auditLog, AppModule.profile},
-    CompanyRole.legalAdmin: {AppModule.questionBank, AppModule.auditLog, AppModule.profile},
+    CompanyRole.systemAdmin: {
+      AppModule.questionBank,
+      AppModule.clauseLibrary,
+      AppModule.logicRules,
+      AppModule.votingSettings,
+      AppModule.currencySettings,
+      AppModule.auditLog,
+      AppModule.profile,
+    },
+    CompanyRole.legalAdmin: {
+      AppModule.questionBank,
+      AppModule.clauseLibrary,
+      AppModule.logicRules,
+      AppModule.auditLog,
+      AppModule.profile,
+    },
     CompanyRole.executiveManager: {AppModule.operationsDashboard, AppModule.notifications, AppModule.profile},
     CompanyRole.financialManager: {AppModule.operationsDashboard, AppModule.notifications, AppModule.profile},
     CompanyRole.departmentManager: {AppModule.operationsDashboard, AppModule.profile},
@@ -242,6 +274,7 @@ class Company {
   CompanyStatus status;
   List<CompanyMember> members;
   int contractVersion; // 0 = لا يوجد عقد موقّع بعد
+  VotingSettings votingSettings; // A11: تُنسخ إلى جلسة التأسيس عند إنشائها
   final DateTime createdAt;
   final String createdBy;
 
@@ -254,6 +287,7 @@ class Company {
     this.status = CompanyStatus.establishment,
     required this.members,
     this.contractVersion = 0,
+    this.votingSettings = VotingSettings.defaults,
     required this.createdAt,
     required this.createdBy,
   });
@@ -275,6 +309,7 @@ class Company {
         'members': members.map((m) => m.toJson()).toList(),
         'memberPhones': members.map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
         'contractVersion': contractVersion,
+        'votingSettings': votingSettings.toJson(),
         'createdAt': createdAt.toUtc().toIso8601String(),
         'createdBy': createdBy,
       };
@@ -290,6 +325,8 @@ class Company {
             .map((m) => CompanyMember.fromJson(Map<String, dynamic>.from(m as Map)))
             .toList(),
         contractVersion: (j['contractVersion'] as num?)?.toInt() ?? 0,
+        votingSettings: VotingSettings.fromJson(
+            j['votingSettings'] == null ? null : Map<String, dynamic>.from(j['votingSettings'] as Map)),
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
         createdBy: j['createdBy'] as String? ?? '',
       );
