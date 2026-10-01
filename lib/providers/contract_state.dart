@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/question_bank.dart';
 import '../models/company.dart' show ActorType;
+import '../models/governance_config.dart';
 import '../models/questionnaire.dart';
 import '../services/cloud_sync.dart';
 import '../services/phone.dart';
@@ -95,6 +96,204 @@ class ContractState extends ChangeNotifier {
 
   BankQuestion question(String id) =>
       bank.where((q) => q.id == id).firstOrNull ?? _remoteQuestions[id]!;
+
+  // ───────────── إعدادات الحوكمة: مكتبة البنود، القواعد، الشروط، العملات ─────────────
+
+  static const _configKey = 'governance_config_v1';
+
+  /// كل إصدارات البنود والقواعد محفوظة؛ الحالي هو أعلى إصدار منشور
+  List<LegalClause> clauseVersions = [];
+  List<LogicRule> ruleVersions = [];
+  Map<String, QuestionCondition> conditions = {};
+  List<CurrencySetting> currencies = AppCurrency.values.map((c) => CurrencySetting(currency: c)).toList();
+
+  /// بذر المكتبة من بنك الأسئلة عند أول تشغيل
+  void _seedConfig() {
+    final now = DateTime.now();
+    for (final q in bank) {
+      if (!clauseVersions.any((c) => c.questionId == q.id)) {
+        clauseVersions.add(LegalClause(
+          id: 'CL-${q.id}',
+          questionId: q.id,
+          title: q.title,
+          text: q.clauseTemplate,
+          category: q.category,
+          updatedAt: now,
+        ));
+      }
+      final r = q.rule;
+      if (r != null && !ruleVersions.any((x) => x.questionId == q.id)) {
+        ruleVersions.add(LogicRule(
+          id: 'R-${q.id}',
+          name: q.title,
+          questionId: q.id,
+          clauseId: 'CL-${q.id}',
+          conditions: [
+            RuleCondition(field: r.field, fieldLabel: r.fieldLabel, op: r.op, isEvent: q.paramKind == ParamKind.none),
+          ],
+          actions: [r.action],
+        ));
+      }
+    }
+  }
+
+  T? _latest<T>(Iterable<T> items, int Function(T) version) {
+    T? best;
+    for (final x in items) {
+      if (best == null || version(x) > version(best)) best = x;
+    }
+    return best;
+  }
+
+  /// البند المنشور الحالي لسؤال
+  LegalClause? publishedClause(String questionId) => _latest(
+      clauseVersions.where((c) => c.questionId == questionId && c.status == ConfigStatus.published), (c) => c.version);
+
+  /// أحدث إصدار (قد يكون مسودة) للتحرير
+  LegalClause? latestClause(String questionId) =>
+      _latest(clauseVersions.where((c) => c.questionId == questionId), (c) => c.version);
+
+  LogicRule? publishedRule(String questionId) => _latest(
+      ruleVersions.where((r) => r.questionId == questionId && r.status == ConfigStatus.published), (r) => r.version);
+
+  LogicRule? latestRule(String questionId) =>
+      _latest(ruleVersions.where((r) => r.questionId == questionId), (r) => r.version);
+
+  /// حفظ مسودة بند: إن كان الأحدث منشوراً يُنشأ إصدار جديد، والمنشور يبقى كما هو
+  void saveClauseDraft(String questionId, {required String title, required String text}) {
+    final cur = latestClause(questionId);
+    if (cur == null) return;
+    if (cur.status == ConfigStatus.draft) {
+      clauseVersions[clauseVersions.indexOf(cur)] = cur.copyWith(title: title, text: text);
+    } else {
+      clauseVersions.add(cur.copyWith(title: title, text: text, version: cur.version + 1, status: ConfigStatus.draft));
+    }
+    _saveConfig();
+  }
+
+  /// نشر المسودة: تُستخدم في الجلسات الجديدة فقط، والجلسات القائمة تحتفظ بلقطتها
+  void publishClause(String questionId) {
+    final cur = latestClause(questionId);
+    if (cur == null || cur.status != ConfigStatus.draft) return;
+    clauseVersions[clauseVersions.indexOf(cur)] = cur.copyWith(status: ConfigStatus.published);
+    _saveConfig();
+  }
+
+  void saveRuleDraft(LogicRule rule) {
+    final cur = latestRule(rule.questionId);
+    if (cur != null && cur.status == ConfigStatus.draft) {
+      ruleVersions[ruleVersions.indexOf(cur)] = rule.copyWith(version: cur.version, status: ConfigStatus.draft);
+    } else {
+      ruleVersions.add(rule.copyWith(version: (cur?.version ?? 0) + 1, status: ConfigStatus.draft));
+    }
+    _saveConfig();
+  }
+
+  /// نشر القاعدة بعد التحقق؛ يُرجع أخطاء التحقق إن وجدت
+  List<String> publishRule(String questionId) {
+    final cur = latestRule(questionId);
+    if (cur == null || cur.status != ConfigStatus.draft) return const [];
+    final errors = cur.validate();
+    if (errors.isNotEmpty) return errors;
+    ruleVersions[ruleVersions.indexOf(cur)] = cur.copyWith(status: ConfigStatus.published);
+    _saveConfig();
+    return const [];
+  }
+
+  /// A07: تعيين شرط ظهور سؤال أو إزالته، مع منع الاعتماد الدائري
+  String? setCondition(String questionId, QuestionCondition? c) {
+    if (c == null) {
+      conditions.remove(questionId);
+      _saveConfig();
+      return null;
+    }
+    if (c.sourceQuestionId == questionId) return 'لا يمكن أن يعتمد السؤال على نفسه';
+    var cursor = conditions[c.sourceQuestionId];
+    final seen = <String>{c.sourceQuestionId};
+    while (cursor != null) {
+      if (cursor.sourceQuestionId == questionId) return 'اعتماد دائري: السؤال المصدر يعتمد على هذا السؤال';
+      if (!seen.add(cursor.sourceQuestionId)) break;
+      cursor = conditions[cursor.sourceQuestionId];
+    }
+    conditions[questionId] = c;
+    _saveConfig();
+    return null;
+  }
+
+  void setCurrency(CurrencySetting c) {
+    final i = currencies.indexWhere((x) => x.currency == c.currency);
+    if (i >= 0) {
+      // يجب أن تبقى عملة واحدة مفعّلة على الأقل
+      if (!c.enabled && currencies.where((x) => x.enabled).length <= 1) return;
+      currencies[i] = c;
+      _saveConfig();
+    }
+  }
+
+  List<AppCurrency> get enabledCurrencies =>
+      currencies.where((c) => c.enabled).map((c) => c.currency).toList();
+
+  Future<void> _loadConfig(SharedPreferences prefs) async {
+    final raw = prefs.getString(_configKey);
+    if (raw != null) {
+      final j = jsonDecode(raw) as Map<String, dynamic>;
+      clauseVersions = (j['clauses'] as List? ?? [])
+          .map((e) => LegalClause.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      ruleVersions = (j['rules'] as List? ?? [])
+          .map((e) => LogicRule.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      conditions = (j['conditions'] as Map? ?? {}).map(
+        (k, v) => MapEntry(k as String, QuestionCondition.fromJson(Map<String, dynamic>.from(v as Map))),
+      );
+      final cur = (j['currencies'] as List? ?? [])
+          .map((e) => CurrencySetting.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+      if (cur.isNotEmpty) currencies = cur;
+    }
+    _seedConfig();
+  }
+
+  void _saveConfig() {
+    notifyListeners();
+    SharedPreferences.getInstance().then((prefs) => prefs.setString(
+          _configKey,
+          jsonEncode({
+            'clauses': clauseVersions.map((c) => c.toJson()).toList(),
+            'rules': ruleVersions.map((r) => r.toJson()).toList(),
+            'conditions': conditions.map((k, v) => MapEntry(k, v.toJson())),
+            'currencies': currencies.map((c) => c.toJson()).toList(),
+          }),
+        ));
+  }
+
+  /// لقطة الإعدادات المنشورة في سجل البند عند إنشاء الجلسة
+  void _snapshot(ClauseRecord r) {
+    final cl = publishedClause(r.questionId);
+    r.clauseText = cl?.text;
+    r.clauseVersion = cl?.version;
+    r.rule = publishedRule(r.questionId)?.toJson();
+    r.showIf = conditions[r.questionId]?.toJson();
+  }
+
+  /// A07: هل ينطبق البند؟ null = لم يُحسم البند المصدر بعد
+  bool? applicable(ContractSession s, ClauseRecord r) {
+    final j = r.showIf;
+    if (j == null) return true;
+    final c = QuestionCondition.fromJson(j);
+    final src = s.records.where((x) => x.questionId == c.sourceQuestionId).firstOrNull;
+    if (src == null) return true;
+    final st = src.status;
+    // البند المصدر لم يُحسم بعد (معلّق أو مؤجل)؛ الرفض أو الجمود يُعامل كعدم اعتماد حتى يُعاد التصويت
+    if (st == ClauseStatus.pending || st == ClauseStatus.deferred) return null;
+    final agreed = st == ClauseStatus.agreed;
+    return switch (c.kind) {
+      ConditionKind.agreed => agreed,
+      ConditionKind.notAgreed => !agreed,
+      ConditionKind.valueCompare => agreed && src.value != null && (c.op ?? ComparisonOp.eq).evaluate(src.value!, c.value ?? 0),
+    };
+  }
+
 
   // ───────────── وضع الخادم ─────────────
 
@@ -257,6 +456,10 @@ class ContractState extends ChangeNotifier {
         'failures': r.failures,
         'notes': r.notes.map((n) => n.toJson()).toList(),
         'deferReason': r.deferReason,
+        'clauseText': r.clauseText,
+        'clauseVersion': r.clauseVersion,
+        'rule': r.rule,
+        'showIf': r.showIf,
         'flag': switch (r.status) {
           ClauseStatus.deferred => 'deferred',
           ClauseStatus.neutralized => 'neutralized',
@@ -333,6 +536,10 @@ class ContractState extends ChangeNotifier {
             .map((n) => ClauseNote.fromJson(Map<String, dynamic>.from(n as Map)))
             .toList(),
         deferReason: m['deferReason'] as String?,
+        clauseText: m['clauseText'] as String?,
+        clauseVersion: (m['clauseVersion'] as num?)?.toInt(),
+        rule: m['rule'] == null ? null : Map<String, dynamic>.from(m['rule'] as Map),
+        showIf: m['showIf'] == null ? null : Map<String, dynamic>.from(m['showIf'] as Map),
       );
       for (final v in votes) {
         if ((v['round'] as num?)?.toInt() != r.round) continue;
@@ -406,11 +613,13 @@ class ContractState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final custom = prefs.getString(_customBankKey);
+      await _loadConfig(prefs);
       if (custom != null) {
         _customQuestions
           ..clear()
           ..addAll((jsonDecode(custom) as List)
               .map((e) => BankQuestion.fromJson(e as Map<String, dynamic>)));
+        _seedConfig();
       }
       final raw = prefs.getString(_sessionsKey);
       if (raw != null && !isCloud) {
@@ -446,6 +655,7 @@ class ContractState extends ChangeNotifier {
   }
 
   void _touch(ContractSession s) {
+    _refreshConditional(s);
     s.updatedAt = DateTime.now();
     notifyListeners();
     _persist();
@@ -455,6 +665,8 @@ class ContractState extends ChangeNotifier {
 
   void addQuestion(BankQuestion q) {
     _customQuestions.add(q);
+    _seedConfig();
+    _saveConfig();
     notifyListeners();
     _persist();
   }
@@ -499,6 +711,7 @@ class ContractState extends ChangeNotifier {
         ));
       }
     }
+    records.forEach(_snapshot);
     final now = DateTime.now();
     final s = ContractSession(
       id: 'S${now.millisecondsSinceEpoch}',
@@ -576,6 +789,9 @@ class ContractState extends ChangeNotifier {
   /// - تكرار الفشل حتى حد الجمود: جمود.
   ClauseStatus deriveStatus(ContractSession s, ClauseRecord r) {
     if (r.status == ClauseStatus.deferred || r.status == ClauseStatus.neutralized) return r.status;
+    // بند مشروط: لا ينطبق إذا لم يتحقق شرطه، ويبقى معلقاً حتى يُحسم البند المصدر
+    final app = applicable(s, r);
+    if (app == false) return ClauseStatus.notApplicable;
     final q = quorum(s, r);
     if (!q.decidable) return ClauseStatus.pending;
     if (q.passed && q.quorumMet) return ClauseStatus.agreed;
@@ -590,6 +806,15 @@ class ContractState extends ChangeNotifier {
     r.resolvedAt = st == ClauseStatus.pending
         ? null
         : (r.votes.isEmpty ? now() : r.votes.values.map((v) => v.at).reduce((a, b) => a.isAfter(b) ? a : b));
+  }
+
+  /// إعادة احتساب البنود المشروطة بعد تغيّر نتيجة أي بند
+  void _refreshConditional(ContractSession s) {
+    for (final r in s.records) {
+      if (r.showIf == null) continue;
+      if (r.status == ClauseStatus.notApplicable) r.status = ClauseStatus.pending;
+      if (r.status == ClauseStatus.pending) _applyDerived(s, r);
+    }
   }
 
   /// إعادة احتساب البنود التي انتهت مهلتها (يُستدعى دورياً وعند فتح الشاشات)
@@ -948,7 +1173,7 @@ class ContractState extends ChangeNotifier {
         ? null
         : s.partners.firstWhere((p) => p.id == r.concernedPartnerId,
             orElse: () => s.partners.first);
-    return q.clauseTemplate
+    return (r.clauseText ?? q.clauseTemplate)
         .replaceAll('{value}', formatValue(s, q, r.value))
         .replaceAll('{capital}', formatCurrency(s.capital, s.currency))
         .replaceAll('{currency}', s.currency.label)
@@ -961,14 +1186,25 @@ class ContractState extends ChangeNotifier {
     for (final r in s.records) {
       if (r.status != ClauseStatus.agreed) continue;
       final q = question(r.questionId);
+      if (q.effect != EffectType.financial) continue;
+      // القاعدة كما كانت منشورة عند إنشاء الجلسة، أو القالب الأصلي للجلسات القديمة
+      final snap = r.rule == null ? null : LogicRule.fromJson(r.rule!);
+      if (snap != null) {
+        final v = r.value == null
+            ? null
+            : '${formatValue(s, q, r.value)}${q.paramKind == ParamKind.percent ? '%' : ''}';
+        out.add(snap.describe(value: (_) => v ?? 'القيمة المتفق عليها'));
+        continue;
+      }
       final rule = q.rule;
-      if (q.effect != EffectType.financial || rule == null) continue;
+      if (rule == null) continue;
       final threshold = r.value == null ? '' : ' ${rule.op.symbol} ${formatValue(s, q, r.value)}'
           '${q.paramKind == ParamKind.percent ? '%' : ''}';
       out.add('إذا كان ${rule.fieldLabel}$threshold: ${rule.action}');
     }
     return out;
   }
+
 
   @override
   void dispose() {

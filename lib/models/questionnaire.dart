@@ -288,7 +288,7 @@ class PartnerVote {
 }
 
 /// حالة البند داخل الجلسة
-enum ClauseStatus { pending, agreed, rejected, deferred, neutralized, quorumFailed, deadlock }
+enum ClauseStatus { pending, agreed, rejected, deferred, neutralized, quorumFailed, deadlock, notApplicable }
 
 extension ClauseStatusX on ClauseStatus {
   String get label => switch (this) {
@@ -299,6 +299,7 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.neutralized => 'محيّد',
         ClauseStatus.quorumFailed => 'تعذّر النصاب',
         ClauseStatus.deadlock => 'جمود',
+        ClauseStatus.notApplicable => 'غير منطبق',
       };
 
   Color get color => switch (this) {
@@ -309,6 +310,7 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.neutralized => const Color(0xFF9B8AFB),
         ClauseStatus.quorumFailed => const Color(0xFFE67E22),
         ClauseStatus.deadlock => const Color(0xFFC0392B),
+        ClauseStatus.notApplicable => const Color(0xFF5B6B82),
       };
 
   IconData get icon => switch (this) {
@@ -319,6 +321,7 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.neutralized => Icons.block_rounded,
         ClauseStatus.quorumFailed => Icons.group_off_rounded,
         ClauseStatus.deadlock => Icons.lock_clock_rounded,
+        ClauseStatus.notApplicable => Icons.do_not_disturb_on_outlined,
       };
 
   /// بنود تحتاج قراراً جديداً من الشركاء (لم تُحسم ولم تؤجل أو تحيّد)
@@ -352,6 +355,16 @@ class ClauseRecord {
   /// سبب التأجيل
   String? deferReason;
 
+  /// لقطة من نص البند وإصداره عند إنشاء الجلسة: تعديل المكتبة لاحقاً لا يغيّر الجلسات القائمة
+  String? clauseText;
+  int? clauseVersion;
+
+  /// لقطة من القاعدة المنطقية المرتبطة (JSON) وإصدارها
+  Map<String, dynamic>? rule;
+
+  /// شرط ظهور البند (JSON لشرط QuestionCondition)
+  Map<String, dynamic>? showIf;
+
   /// الشركاء الذين وافقوا على تحييد البند في الجولة الحالية (وضع الخادم)
   Set<String> neutralConsents = {};
 
@@ -368,6 +381,10 @@ class ClauseRecord {
     this.failures = 0,
     List<ClauseNote>? notes,
     this.deferReason,
+    this.clauseText,
+    this.clauseVersion,
+    this.rule,
+    this.showIf,
   })  : votes = votes ?? {},
         notes = notes ?? [];
 
@@ -384,6 +401,10 @@ class ClauseRecord {
         'failures': failures,
         'notes': notes.map((n) => n.toJson()).toList(),
         'deferReason': deferReason,
+        'clauseText': clauseText,
+        'clauseVersion': clauseVersion,
+        'rule': rule,
+        'showIf': showIf,
       };
 
   factory ClauseRecord.fromJson(Map<String, dynamic> j) => ClauseRecord(
@@ -405,6 +426,10 @@ class ClauseRecord {
             .map((n) => ClauseNote.fromJson(Map<String, dynamic>.from(n as Map)))
             .toList(),
         deferReason: j['deferReason'] as String?,
+        clauseText: j['clauseText'] as String?,
+        clauseVersion: (j['clauseVersion'] as num?)?.toInt(),
+        rule: j['rule'] == null ? null : Map<String, dynamic>.from(j['rule'] as Map),
+        showIf: j['showIf'] == null ? null : Map<String, dynamic>.from(j['showIf'] as Map),
       );
 }
 
@@ -645,12 +670,14 @@ class ContractSession {
   /// نسبة الإنجاز: البنود المحسومة (متراضى عليها أو محيّدة) من الإجمالي
   double get progress => records.isEmpty
       ? 0
-      : (count(ClauseStatus.agreed) + count(ClauseStatus.neutralized)) /
+      : (count(ClauseStatus.agreed) + count(ClauseStatus.neutralized) + count(ClauseStatus.notApplicable)) /
           records.length;
 
   /// لا يُصدر العقد إلا بعد حسم كافة البنود
   bool get allResolved => records.every((r) =>
-      r.status == ClauseStatus.agreed || r.status == ClauseStatus.neutralized);
+      r.status == ClauseStatus.agreed ||
+      r.status == ClauseStatus.neutralized ||
+      r.status == ClauseStatus.notApplicable);
 
   Map<String, dynamic> toJson() => {
         'id': id,

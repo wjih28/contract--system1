@@ -41,6 +41,7 @@ class _DecisionDetailsScreenState extends State<DecisionDetailsScreen> {
         ClauseStatus.neutralized => GovStatus.neutralized,
         ClauseStatus.quorumFailed => GovStatus.pending,
         ClauseStatus.deadlock => GovStatus.dispute,
+        ClauseStatus.notApplicable => GovStatus.archived,
       };
 
   @override

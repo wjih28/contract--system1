@@ -634,6 +634,20 @@ class _Outcome extends StatelessWidget {
             ],
           ],
         );
+      case ClauseStatus.notApplicable:
+        return panel(
+          color: st.color,
+          icon: st.icon,
+          title: 'البند غير منطبق',
+          body: 'لا ينطبق هذا البند بناءً على نتيجة البند الذي يعتمد عليه، فلا يُصوَّت عليه ولا يدخل في العقد.',
+          actions: [
+            ElevatedButton.icon(
+              onPressed: onNext,
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: const Text('البند التالي'),
+            ),
+          ],
+        );
       case ClauseStatus.pending:
         return const SizedBox.shrink();
     }
