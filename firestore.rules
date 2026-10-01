@@ -24,6 +24,15 @@ service cloud.firestore {
       return signedIn() && myPhone() in sessionData(sid).memberPhones;
     }
 
+    // الشاهد المدعو برقم جواله يقرأ الجلسة ليشهد على إصدارها، دون حق التصويت
+    function isWitness(sid) {
+      return signedIn() && myPhone() in sessionData(sid).get('witnessPhones', []);
+    }
+
+    function canRead(sid) {
+      return isMember(sid) || isWitness(sid);
+    }
+
     function isOpen(sid) {
       return sessionData(sid).status != 'completed';
     }
@@ -73,7 +82,9 @@ service cloud.firestore {
 
     // ───────────── جلسات التأسيس ─────────────
     match /sessions/{sid} {
-      allow read: if signedIn() && myPhone() in resource.data.memberPhones;
+      allow read: if signedIn()
+        && (myPhone() in resource.data.memberPhones
+            || myPhone() in resource.data.get('witnessPhones', []));
 
       allow create: if signedIn()
         && myPhone() in request.resource.data.memberPhones
@@ -99,7 +110,7 @@ service cloud.firestore {
         && resource.data.status != 'completed';
 
       match /votes/{voteId} {
-        allow read: if isMember(sid);
+        allow read: if canRead(sid);
         allow create, update: if isMember(sid)
           && isOpen(sid)
           && actsAs(sid, request.resource.data.partnerId)
@@ -110,14 +121,27 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // التوقيع مرتبط بإصدار المسودة؛ إعادة التوقيع مسموحة لصاحبه فقط قبل الاعتماد
       match /signoffs/{partnerId} {
-        allow read: if isMember(sid);
-        allow create: if isMember(sid)
+        allow read: if canRead(sid);
+        allow create, update: if isMember(sid)
           && isOpen(sid)
           && actsAs(sid, partnerId)
           && request.resource.data.phone == myPhone()
+          && request.resource.data.draftHash is string
           && request.resource.data.at == request.time;
-        allow update, delete: if false;
+        allow delete: if false;
+      }
+
+      // شهادة الشاهد من جواله: المستند باسم رقمه، ولا يكتبها غيره
+      match /attestations/{phone} {
+        allow read: if canRead(sid);
+        allow create, update: if isWitness(sid)
+          && isOpen(sid)
+          && phone == myPhone()
+          && request.resource.data.draftHash is string
+          && request.resource.data.at == request.time;
+        allow delete: if false;
       }
     }
   }
