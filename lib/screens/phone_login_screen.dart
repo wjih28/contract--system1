@@ -117,6 +117,9 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
         'invalid-phone-number' => 'رقم الجوال غير صحيح',
         'invalid-verification-code' => 'الكود غير صحيح',
         'too-many-requests' => 'محاولات كثيرة، حاول لاحقاً',
+        // سياسة المناطق في Firebase تمنع إرسال SMS لهذه الدولة
+        'operation-not-allowed' when (e.message ?? '').contains('region') =>
+          'إرسال الرسائل لهذه الدولة غير مفعّل بعد في إعدادات Firebase',
         'session-expired' => 'انتهت صلاحية الكود، اطلب كوداً جديداً',
         _ => 'تعذر التحقق: ${e.message ?? e.code}',
       };
