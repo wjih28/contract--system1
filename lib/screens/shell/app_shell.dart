@@ -5,6 +5,8 @@ import '../../design/responsive.dart';
 import '../../design/state_view.dart';
 import '../../models/company.dart';
 import '../../providers/company_state.dart';
+import '../../providers/contract_state.dart';
+import '../establishment/witness_tasks_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../company/audit_log_screen.dart';
@@ -37,7 +39,10 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final cs = context.watch<CompanyState>();
     if (!cs.loaded) return const Scaffold(body: SkeletonList());
-    if (cs.companies.isEmpty) return const _NoCompany();
+    if (cs.companies.isEmpty) {
+      // شاهد مدعو من خارج الشركة: يرى مهامه فقط
+      return context.watch<ContractState>().witnessTasks.isNotEmpty ? const WitnessTasksScreen() : const _NoCompany();
+    }
 
     final modules = cs.myModules;
     if (modules.isEmpty) {
@@ -155,10 +160,7 @@ class _AppShellState extends State<AppShell> {
             title: 'لوحة التشغيل',
             message: 'بوابة المدير التنفيذي والمالي للعمليات اليومية ضمن قواعد العقد. تُبنى في المرحلتين 2 و4.',
           ),
-        AppModule.professionalTasks => const _Upcoming(
-            title: 'مهامي المهنية',
-            message: 'مراجعة المحامي والمحاسب وشهادة الشاهد. تُبنى في المرحلة 5.',
-          ),
+        AppModule.professionalTasks => const WitnessTasksScreen(),
       };
 }
 

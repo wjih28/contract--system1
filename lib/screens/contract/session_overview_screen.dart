@@ -7,7 +7,10 @@ import '../../services/contract_pdf.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
 import 'clause_voting_screen.dart';
-import 'finalize_screen.dart';
+import '../establishment/contract_summary_screen.dart';
+import '../establishment/deferred_screen.dart';
+import '../establishment/final_contract_screen.dart';
+import '../establishment/voting_center_screen.dart';
 
 /// ملخص الجلسة: التقدم، البنود حسب الحالة، التعليق والاستئناف، التقرير المرحلي
 class SessionOverviewScreen extends StatelessWidget {
@@ -104,15 +107,12 @@ class SessionOverviewScreen extends StatelessWidget {
               ),
             if (s.allResolved)
               ElevatedButton.icon(
-                onPressed: () {
-                  state.markAwaitingSignature(s);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => FinalizeScreen(sessionId: s.id)),
-                  );
-                },
-                icon: const Icon(Icons.draw_rounded),
-                label: const Text('التوقيع وتوليد العقد'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => ContractSummaryScreen(sessionId: s.id)),
+                ),
+                icon: const Icon(Icons.fact_check_rounded),
+                label: const Text('ملخص العقد ثم التوقيع'),
               ),
             const SizedBox(height: 10),
             Row(
@@ -139,11 +139,34 @@ class SessionOverviewScreen extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => VotingCenterScreen(sessionId: s.id))),
+                    icon: const Icon(Icons.how_to_vote_rounded, size: 18),
+                    label: const Text('مركز التصويت'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => DeferredScreen(sessionId: s.id))),
+                    icon: const Icon(Icons.schedule_rounded, size: 18),
+                    label: const Text('المؤجلة والمحيّدة'),
+                  ),
+                ),
+              ],
+            ),
           ] else ...[
             ElevatedButton.icon(
-              onPressed: () => ContractPdf.share(state, s, interim: false),
-              icon: const Icon(Icons.picture_as_pdf_rounded),
-              label: const Text('عرض العقد النهائي PDF'),
+              onPressed: () => Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => FinalContractScreen(sessionId: s.id))),
+              icon: const Icon(Icons.description_rounded),
+              label: const Text('العقد النهائي والأدلة'),
             ),
             if (s.contentHash != null) ...[
               const SizedBox(height: 12),

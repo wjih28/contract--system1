@@ -224,6 +224,20 @@ class CompanyState extends ChangeNotifier {
     return c;
   }
 
+  /// بعد اعتماد العقد: تصبح الشركة نشطة ويُسجَّل رقم إصدار العقد
+  void setContractVersion(String companyId, int version) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null) return;
+    c.contractVersion = version;
+    c.status = CompanyStatus.active;
+    _db?.collection('companies').doc(companyId).update({'contractVersion': version, 'status': c.status.name}).then(
+          (_) {},
+          onError: (Object e) => debugPrint('تعذر تحديث إصدار العقد: $e'),
+        );
+    notifyListeners();
+    _persist();
+  }
+
   // ───────────── سجل التدقيق ─────────────
 
   /// تسجيل حدث تدقيق. السجل للإضافة فقط: لا توجد دالة تعديل أو حذف.
