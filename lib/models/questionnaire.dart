@@ -481,6 +481,7 @@ extension SessionStatusX on SessionStatus {
 /// جلسة إعداد عقد تأسيس
 class ContractSession {
   final String id;
+  final String? companyId; // الشركة التي تتبعها جلسة التأسيس
   String companyName;
   String companyType;
   AppCurrency currency;
@@ -500,6 +501,7 @@ class ContractSession {
 
   ContractSession({
     required this.id,
+    this.companyId,
     required this.companyName,
     required this.companyType,
     required this.currency,
@@ -531,6 +533,7 @@ class ContractSession {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'companyId': companyId,
         'companyName': companyName,
         'companyType': companyType,
         'currency': currency.name,
@@ -549,6 +552,7 @@ class ContractSession {
 
   factory ContractSession.fromJson(Map<String, dynamic> j) => ContractSession(
         id: j['id'] as String,
+        companyId: j['companyId'] as String?,
         companyName: j['companyName'] as String,
         companyType: j['companyType'] as String,
         currency: AppCurrency.values.byName(j['currency'] as String),

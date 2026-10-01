@@ -3,11 +3,10 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/questionnaire.dart';
+import '../providers/company_state.dart';
 import '../providers/contract_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import 'contract/new_session_screen.dart';
-import 'contract/question_bank_screen.dart';
 import 'contract/session_overview_screen.dart';
 
 /// تبويب العقود: جلسات إعداد عقود التأسيس عبر الاستبانة الذكية
@@ -17,33 +16,35 @@ class ContractsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ContractState>();
-    final sessions = state.sessions;
+    final company = context.watch<CompanyState>().current;
+    // جلسات الشركة الحالية فقط، والجلسات القديمة غير المرتبطة بشركة تظهر عند عدم وجود شركة
+    final sessions = state.sessionsFor(company?.id);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('عقود التأسيس'),
-        actions: [
-          IconButton(
-            tooltip: 'بنك البنود',
-            icon: const Icon(Icons.library_books_rounded),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const QuestionBankScreen()),
+      appBar: AppBar(title: const Text('التأسيس والعقد')),
+      // الشركة الواحدة لها جلسة تأسيس واحدة؛ تعديل العقد بعد اعتماده يكون بإصدار جديد (المرحلة 3)
+      floatingActionButton: company == null || sessions.isNotEmpty
+          ? null
+          : FloatingActionButton.extended(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.navyDark,
+              onPressed: () {
+                final s = state.createSession(
+                  companyId: company.id,
+                  companyName: company.legalName,
+                  companyType: company.companyType,
+                  currency: company.currency,
+                  capital: company.capital,
+                  partners: company.partners.map((m) => m.toSessionPartner()).toList(),
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SessionOverviewScreen(sessionId: s.id)),
+                );
+              },
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('بدء جلسة التأسيس', style: TextStyle(fontWeight: FontWeight.w800)),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.gold,
-        foregroundColor: AppColors.navyDark,
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const NewSessionScreen()),
-        ),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('جلسة تأسيس جديدة',
-            style: TextStyle(fontWeight: FontWeight.w800)),
-      ),
       body: !state.loaded
           ? const Center(child: CircularProgressIndicator())
           : ListView(

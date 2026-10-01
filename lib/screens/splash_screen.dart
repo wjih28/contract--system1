@@ -3,7 +3,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../services/backend.dart';
 import 'login_screen.dart';
-import 'main_shell.dart';
+import 'shell/app_shell.dart';
 import 'phone_login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -35,7 +35,7 @@ class _SplashScreenState extends State<SplashScreen>
         } else {
           if (!mounted) return;
           await Backend.attach(context, user);
-          next = const MainShell();
+          next = const AppShell();
         }
       }
       if (mounted) {

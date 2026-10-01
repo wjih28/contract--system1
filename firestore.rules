@@ -33,6 +33,45 @@ service cloud.firestore {
       return sessionData(sid).partnerPhones[partnerId] == myPhone();
     }
 
+    // ───────────── الشركات ─────────────
+    function companyData(cid) {
+      return get(/databases/$(database)/documents/companies/$(cid)).data;
+    }
+
+    function isCompanyMember(cid) {
+      return signedIn() && myPhone() in companyData(cid).memberPhones;
+    }
+
+    match /companies/{cid} {
+      allow read: if signedIn() && myPhone() in resource.data.memberPhones;
+
+      // منشئ الشركة يجب أن يكون أحد أعضائها
+      allow create: if signedIn()
+        && myPhone() in request.resource.data.memberPhones
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // هيكل الملكية والأعضاء لا يتغير من الواجهة مباشرة؛
+      // تغييره يكون بقرار وإصدار عقد جديد (المرحلة 3)
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && request.resource.data.members == resource.data.members
+        && request.resource.data.memberPhones == resource.data.memberPhones
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      allow delete: if false;
+
+      // سجل التدقيق: للإضافة فقط، ولا يُعدَّل ولا يُحذف أبداً
+      match /audit/{eventId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.actorPhone == myPhone()
+          && request.resource.data.companyId == cid
+          && request.resource.data.at == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // ───────────── جلسات التأسيس ─────────────
     match /sessions/{sid} {
       allow read: if signedIn() && myPhone() in resource.data.memberPhones;
 

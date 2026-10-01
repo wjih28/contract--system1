@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../firebase_options.dart';
 import '../models/models.dart';
 import '../providers/app_state.dart';
+import '../providers/company_state.dart';
 import '../providers/contract_state.dart';
 import 'cloud_sync.dart';
 
@@ -17,7 +18,11 @@ class Backend {
 
   static bool ready = false;
 
+  /// تشغيل تجريبي بدون خادم: flutter run --dart-define=LOCAL_MODE=true
+  static const localMode = bool.fromEnvironment('LOCAL_MODE');
+
   static Future<void> init() async {
+    if (localMode) return;
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       ready = true;
@@ -40,13 +45,17 @@ class Backend {
           role: UserRole.investorPartner,
           avatarInitial: 'ش',
         ));
+    final companies = context.read<CompanyState>();
     await context
         .read<ContractState>()
         .attachCloud(CloudSync(FirebaseFirestore.instance), phone: phone, uid: user.uid);
+    await companies.attachCloud(FirebaseFirestore.instance, phone: phone, uid: user.uid);
   }
 
   static Future<void> signOut(BuildContext context) async {
+    final companies = context.read<CompanyState>();
     await context.read<ContractState>().detachCloud();
+    await companies.detachCloud();
     if (ready) await FirebaseAuth.instance.signOut();
   }
 }

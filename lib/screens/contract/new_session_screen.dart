@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import '../../models/questionnaire.dart';
 import '../../providers/app_state.dart';
+import '../../models/company.dart';
+import '../../providers/company_state.dart';
 import '../../providers/contract_state.dart';
 import '../../services/phone.dart';
 import '../../theme/app_theme.dart';
@@ -52,6 +54,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
   String _type = _types.first;
   AppCurrency _currency = AppCurrency.usd;
   final List<_PartnerDraft> _partners = [];
+  int _managing = 0; // الشريك المدير (حسب ترتيبه في الجدول)
 
   @override
   void initState() {
@@ -120,20 +123,31 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
         return;
       }
     }
-    final s = state.createSession(
-      companyName: _company.text.trim(),
+    // رحلة التأسيس: إنشاء الشركة بشركائها وحصصها ثم فتح جلسة التأسيس لها
+    final company = context.read<CompanyState>().createCompany(
+      legalName: _company.text.trim(),
       companyType: _type,
       currency: _currency,
       capital: double.parse(_capital.text.trim()),
-      partners: _partners
-          .map((p) => SessionPartner(
-                id: p.id,
-                name: p.name.text.trim(),
-                nationalId: p.nationalId.text.trim(),
-                phone: normalizePhone(p.phone.text),
-                equity: double.parse(p.equity.text.trim()),
-              ))
-          .toList(),
+      members: [
+        for (var i = 0; i < _partners.length; i++)
+          CompanyMember(
+            id: _partners[i].id,
+            name: _partners[i].name.text.trim(),
+            nationalId: _partners[i].nationalId.text.trim(),
+            phone: normalizePhone(_partners[i].phone.text),
+            equity: double.parse(_partners[i].equity.text.trim()),
+            roles: {i == _managing ? CompanyRole.managingPartner : CompanyRole.partner},
+          ),
+      ],
+    );
+    final s = state.createSession(
+      companyId: company.id,
+      companyName: company.legalName,
+      companyType: company.companyType,
+      currency: company.currency,
+      capital: company.capital,
+      partners: company.partners.map((m) => m.toSessionPartner()).toList(),
     );
     Navigator.pushReplacement(
       context,
@@ -153,7 +167,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
     final sumOk = (sum - 100).abs() <= 0.01;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('جلسة تأسيس جديدة')),
+      appBar: AppBar(title: const Text('تأسيس شركة جديدة')),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -235,10 +249,13 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                   draft: e.value,
                   required: _required,
                   onChanged: () => setState(() {}),
+                  managing: e.key == _managing,
+                  onSetManaging: () => setState(() => _managing = e.key),
                   onRemove: _partners.length <= 2
                       ? null
                       : () => setState(() {
                             _partners.removeAt(e.key).dispose();
+                            if (_managing >= _partners.length) _managing = 0;
                           }),
                 )),
             OutlinedButton.icon(
@@ -251,7 +268,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
             ElevatedButton.icon(
               onPressed: _start,
               icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('بدء جلسة التصويت'),
+              label: const Text('إنشاء الشركة وبدء جلسة التأسيس'),
             ),
           ],
         ),
@@ -296,6 +313,8 @@ class _PartnerForm extends StatelessWidget {
   final String? Function(String?) required;
   final VoidCallback onChanged;
   final VoidCallback? onRemove;
+  final bool managing;
+  final VoidCallback onSetManaging;
 
   const _PartnerForm({
     required this.index,
@@ -303,6 +322,8 @@ class _PartnerForm extends StatelessWidget {
     required this.required,
     required this.onChanged,
     required this.onRemove,
+    required this.managing,
+    required this.onSetManaging,
   });
 
   @override
@@ -326,6 +347,20 @@ class _PartnerForm extends StatelessWidget {
                     style: const TextStyle(
                         color: AppColors.textSecondary, fontWeight: FontWeight.w700)),
                 const Spacer(),
+                ChoiceChip(
+                  label: const Text('الشريك المدير'),
+                  selected: managing,
+                  onSelected: (_) => onSetManaging(),
+                  selectedColor: AppColors.gold,
+                  backgroundColor: AppColors.navyLight,
+                  labelStyle: TextStyle(
+                    color: managing ? AppColors.navyDark : AppColors.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  side: const BorderSide(color: AppColors.divider),
+                  visualDensity: VisualDensity.compact,
+                ),
                 if (onRemove != null)
                   IconButton(
                     onPressed: onRemove,

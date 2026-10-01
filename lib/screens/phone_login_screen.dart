@@ -7,7 +7,7 @@ import '../services/backend.dart';
 import '../services/phone.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import 'main_shell.dart';
+import 'shell/app_shell.dart';
 
 /// الدخول برقم الجوال وكود SMS: رقم الجوال هو هوية الشريك في التصويت والتوقيع
 class PhoneLoginScreen extends StatefulWidget {
@@ -110,7 +110,7 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     if (!mounted) return;
     await Backend.attach(context, user);
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
+    Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppShell()));
   }
 
   String _message(FirebaseAuthException e) => switch (e.code) {

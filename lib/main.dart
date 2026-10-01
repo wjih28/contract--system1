@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/app_state.dart';
+import 'providers/company_state.dart';
 import 'providers/contract_state.dart';
 import 'services/backend.dart';
 import 'theme/app_theme.dart';
@@ -20,7 +21,13 @@ class MithaqApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AppState()),
-        ChangeNotifierProvider(create: (_) => ContractState()..load()),
+        ChangeNotifierProvider(create: (_) => CompanyState()..load()),
+        // كل إجراء في جلسات التأسيس يُسجَّل في سجل تدقيق الشركة
+        ChangeNotifierProvider(
+          create: (ctx) => ContractState()
+            ..auditSink = ctx.read<CompanyState>().log
+            ..load(),
+        ),
       ],
       child: MaterialApp(
         title: 'ميثاق',

@@ -17,7 +17,36 @@ import '../widgets/common_widgets.dart';
 /// - محلي: جهاز واحد، والجلسات محفوظة على الجهاز.
 /// - خادم (Firebase): كل شريك يصوّت ويوقّع من جواله، والأصوات تُزامَن لحظياً.
 /// في وضع الخادم تُشتق حالة كل بند من الأصوات نفسها، فلا يحدث تعارض بين الأجهزة.
+/// مستقبِل أحداث التدقيق (تربطه الواجهة بسجل تدقيق الشركة)
+typedef AuditSink = void Function(
+  String companyId, {
+  required String action,
+  required String objectType,
+  required String objectId,
+  String result,
+  String? evidenceRef,
+});
+
 class ContractState extends ChangeNotifier {
+  /// كل إجراء على الجلسة يُسجَّل في سجل تدقيق الشركة
+  AuditSink? auditSink;
+
+  void _audit(ContractSession s, String action,
+      {String objectType = 'clause', required String objectId, String result = '', String? evidence}) {
+    final cid = s.companyId;
+    if (cid == null) return;
+    auditSink?.call(cid, action: action, objectType: objectType, objectId: objectId, result: result, evidenceRef: evidence);
+  }
+
+  String _title(ClauseRecord r) => question(r.questionId).title;
+
+  String _partnerName(ContractSession s, String id) =>
+      s.partners.where((p) => p.id == id).firstOrNull?.name ?? id;
+
+  /// جلسات شركة معينة
+  List<ContractSession> sessionsFor(String? companyId) =>
+      sessions.where((s) => s.companyId == companyId).toList();
+
   static const _sessionsKey = 'contract_sessions_v1';
   static const _customBankKey = 'custom_bank_v1';
 
@@ -119,6 +148,7 @@ class ContractState extends ChangeNotifier {
     final phones = {for (final p in s.partners) p.id: normalizePhone(p.phone)};
     final used = s.records.map((r) => r.questionId).toSet();
     return {
+      'companyId': s.companyId,
       'companyName': s.companyName,
       'companyType': s.companyType,
       'currency': s.currency.name,
@@ -171,6 +201,7 @@ class ContractState extends ChangeNotifier {
     final recs = Map<String, dynamic>.from(d['records'] as Map);
     final s = ContractSession(
       id: id,
+      companyId: d['companyId'] as String?,
       companyName: d['companyName'] as String,
       companyType: d['companyType'] as String,
       currency: AppCurrency.values.byName(d['currency'] as String),
@@ -334,6 +365,7 @@ class ContractState extends ChangeNotifier {
   // ───────────── الجلسات ─────────────
 
   ContractSession createSession({
+    String? companyId,
     required String companyName,
     required String companyType,
     required AppCurrency currency,
@@ -363,6 +395,7 @@ class ContractState extends ChangeNotifier {
     final now = DateTime.now();
     final s = ContractSession(
       id: 'S${now.millisecondsSinceEpoch}',
+      companyId: companyId,
       companyName: companyName,
       companyType: companyType,
       currency: currency,
@@ -452,12 +485,15 @@ class ContractState extends ChangeNotifier {
           phone: myPhone!,
         )
         .catchError((Object e) => debugPrint('تعذر تسجيل الصوت في الخادم: $e'));
+    _audit(s, 'تصويت ${_partnerName(s, partnerId)} بـ "${ballot.label}" على: ${_title(r)}',
+        objectId: r.key, result: r.status.label, evidence: 'تأكيد: ${method.label}، الجولة ${r.round}');
     _touch(s);
   }
 
   /// موافقة شريك على تحييد البند (وضع الخادم: يوافق كل شريك من جواله)
   void consentNeutralize(ContractSession s, ClauseRecord r, String partnerId, ConfirmMethod method) {
     r.neutralConsents.add(partnerId);
+    _audit(s, 'موافقة ${_partnerName(s, partnerId)} على تحييد: ${_title(r)}', objectId: r.key, evidence: 'تأكيد: ${method.label}');
     _cloud
         ?.vote(
           sid: s.id,
@@ -483,6 +519,7 @@ class ContractState extends ChangeNotifier {
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
     _remoteRecord(s, r);
+    _audit(s, 'تعديل قيمة البند: ${_title(r)}', objectId: r.key, result: 'القيمة الجديدة $value، الجولة ${r.round}');
     _touch(s);
   }
 
@@ -492,6 +529,7 @@ class ContractState extends ChangeNotifier {
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
     _remoteRecord(s, r);
+    _audit(s, 'إعادة التصويت على: ${_title(r)}', objectId: r.key, result: 'الجولة ${r.round}');
     _touch(s);
   }
 
@@ -499,6 +537,7 @@ class ContractState extends ChangeNotifier {
     r.status = ClauseStatus.deferred;
     r.resolvedAt = null;
     _remoteRecord(s, r);
+    _audit(s, 'تأجيل البند: ${_title(r)}', objectId: r.key, result: ClauseStatus.deferred.label);
     _touch(s);
   }
 
@@ -509,6 +548,7 @@ class ContractState extends ChangeNotifier {
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
     _remoteRecord(s, r);
+    _audit(s, 'إعادة فتح البند: ${_title(r)}', objectId: r.key, result: 'الجولة ${r.round}');
     _touch(s);
   }
 
@@ -517,12 +557,14 @@ class ContractState extends ChangeNotifier {
     r.status = ClauseStatus.neutralized;
     r.resolvedAt = DateTime.now();
     _remoteRecord(s, r);
+    _audit(s, 'تحييد البند باتفاق الشركاء: ${_title(r)}', objectId: r.key, result: ClauseStatus.neutralized.label);
     _touch(s);
   }
 
   void suspend(ContractSession s) {
     s.status = SessionStatus.suspended;
     _remote(s, {'status': s.status.name});
+    _audit(s, 'تعليق جلسة التأسيس', objectType: 'session', objectId: s.id, result: 'محفوظ ما تم التراضي عليه');
     _touch(s);
   }
 
@@ -531,6 +573,7 @@ class ContractState extends ChangeNotifier {
       s.status = SessionStatus.active;
       s.sittings++;
       _remote(s, {'status': s.status.name, 'sittings': s.sittings});
+      _audit(s, 'استئناف جلسة التأسيس', objectType: 'session', objectId: s.id, result: 'الجلسة رقم ${s.sittings}');
       _touch(s);
     }
   }
@@ -554,12 +597,15 @@ class ContractState extends ChangeNotifier {
           phone: myPhone!,
         )
         .catchError((Object e) => debugPrint('تعذر حفظ التوقيع في الخادم: $e'));
+    _audit(s, 'توقيع ${_partnerName(s, so.partnerId)} النهائي وإقرار الأهلية', objectType: 'contract', objectId: s.id,
+        result: 'تم التوقيع', evidence: 'تأكيد: ${so.method.label}');
     _touch(s);
   }
 
   void setWitnesses(ContractSession s, List<Witness> w) {
     s.witnesses = w;
     _remote(s, {'witnesses': w.map((x) => x.toJson()).toList()});
+    _audit(s, 'تحديث الشهود', objectType: 'contract', objectId: s.id, result: '${w.length} شهود');
     _touch(s);
   }
 
@@ -573,6 +619,8 @@ class ContractState extends ChangeNotifier {
       'completedAt': s.completedAt!.toIso8601String(),
       'contentHash': s.contentHash,
     });
+    _audit(s, 'اعتماد العقد النهائي', objectType: 'contract', objectId: s.id, result: 'العقد مقفل للقراءة فقط',
+        evidence: 'SHA-256: ${s.contentHash}');
     _touch(s);
   }
 
