@@ -15,6 +15,28 @@ class CloudSync {
   Stream<QuerySnapshot<Map<String, dynamic>>> mySessions(String phone) =>
       _sessions.where('memberPhones', arrayContains: phone).snapshots();
 
+  /// الجلسات التي دُعي فيها المستخدم شاهداً
+  Stream<QuerySnapshot<Map<String, dynamic>>> witnessSessions(String phone) =>
+      _sessions.where('witnessPhones', arrayContains: phone).snapshots();
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> attestations(String sid) =>
+      _sessions.doc(sid).collection('attestations').snapshots();
+
+  /// شهادة الشاهد من جواله: المستند باسم رقم جواله، ولا يُعدَّل بعد كتابته
+  Future<void> attest({
+    required String sid,
+    required String phone,
+    required String signaturePng,
+    required String method,
+    required String draftHash,
+  }) =>
+      _sessions.doc(sid).collection('attestations').doc(phone).set({
+        'signaturePng': signaturePng,
+        'method': method,
+        'draftHash': draftHash,
+        'at': FieldValue.serverTimestamp(),
+      });
+
   Stream<QuerySnapshot<Map<String, dynamic>>> votes(String sid) =>
       _sessions.doc(sid).collection('votes').snapshots();
 
@@ -54,11 +76,13 @@ class CloudSync {
     required String signaturePng,
     required String method,
     required String phone,
+    String draftHash = '',
   }) =>
       _sessions.doc(sid).collection('signoffs').doc(partnerId).set({
         'signaturePng': signaturePng,
         'method': method,
         'phone': phone,
+        'draftHash': draftHash,
         'at': FieldValue.serverTimestamp(),
       });
 }

@@ -288,7 +288,7 @@ class PartnerVote {
 }
 
 /// حالة البند داخل الجلسة
-enum ClauseStatus { pending, agreed, rejected, deferred, neutralized }
+enum ClauseStatus { pending, agreed, rejected, deferred, neutralized, quorumFailed, deadlock }
 
 extension ClauseStatusX on ClauseStatus {
   String get label => switch (this) {
@@ -297,6 +297,8 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.rejected => 'لم يبلغ النصاب',
         ClauseStatus.deferred => 'مؤجل',
         ClauseStatus.neutralized => 'محيّد',
+        ClauseStatus.quorumFailed => 'تعذّر النصاب',
+        ClauseStatus.deadlock => 'جمود',
       };
 
   Color get color => switch (this) {
@@ -305,6 +307,8 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.rejected => const Color(0xFFE74C3C),
         ClauseStatus.deferred => const Color(0xFFF39C12),
         ClauseStatus.neutralized => const Color(0xFF9B8AFB),
+        ClauseStatus.quorumFailed => const Color(0xFFE67E22),
+        ClauseStatus.deadlock => const Color(0xFFC0392B),
       };
 
   IconData get icon => switch (this) {
@@ -313,7 +317,16 @@ extension ClauseStatusX on ClauseStatus {
         ClauseStatus.rejected => Icons.error_rounded,
         ClauseStatus.deferred => Icons.schedule_rounded,
         ClauseStatus.neutralized => Icons.block_rounded,
+        ClauseStatus.quorumFailed => Icons.group_off_rounded,
+        ClauseStatus.deadlock => Icons.lock_clock_rounded,
       };
+
+  /// بنود تحتاج قراراً جديداً من الشركاء (لم تُحسم ولم تؤجل أو تحيّد)
+  bool get needsDecision =>
+      this == ClauseStatus.pending ||
+      this == ClauseStatus.rejected ||
+      this == ClauseStatus.quorumFailed ||
+      this == ClauseStatus.deadlock;
 }
 
 /// سجل بند داخل جلسة: الأصوات والقيمة المتفق عليها والحالة
@@ -327,6 +340,18 @@ class ClauseRecord {
   Map<String, PartnerVote> votes;
   DateTime? resolvedAt;
 
+  /// بداية التصويت في الجولة الحالية (أول صوت)، ومنها تُحسب المهلة
+  DateTime? openedAt;
+
+  /// عدد الجولات المتتالية التي فشلت (رفض أو تعذّر نصاب)؛ تكرارها يعني جموداً
+  int failures;
+
+  /// ملاحظات النقاش على البند
+  List<ClauseNote> notes;
+
+  /// سبب التأجيل
+  String? deferReason;
+
   /// الشركاء الذين وافقوا على تحييد البند في الجولة الحالية (وضع الخادم)
   Set<String> neutralConsents = {};
 
@@ -339,7 +364,12 @@ class ClauseRecord {
     this.round = 1,
     Map<String, PartnerVote>? votes,
     this.resolvedAt,
-  }) : votes = votes ?? {};
+    this.openedAt,
+    this.failures = 0,
+    List<ClauseNote>? notes,
+    this.deferReason,
+  })  : votes = votes ?? {},
+        notes = notes ?? [];
 
   Map<String, dynamic> toJson() => {
         'key': key,
@@ -350,6 +380,10 @@ class ClauseRecord {
         'round': round,
         'votes': votes.map((k, v) => MapEntry(k, v.toJson())),
         'resolvedAt': resolvedAt?.toIso8601String(),
+        'openedAt': openedAt?.toIso8601String(),
+        'failures': failures,
+        'notes': notes.map((n) => n.toJson()).toList(),
+        'deferReason': deferReason,
       };
 
   factory ClauseRecord.fromJson(Map<String, dynamic> j) => ClauseRecord(
@@ -365,7 +399,56 @@ class ClauseRecord {
         resolvedAt: j['resolvedAt'] == null
             ? null
             : DateTime.parse(j['resolvedAt'] as String),
+        openedAt: j['openedAt'] == null ? null : DateTime.parse(j['openedAt'] as String),
+        failures: (j['failures'] as num?)?.toInt() ?? 0,
+        notes: (j['notes'] as List? ?? [])
+            .map((n) => ClauseNote.fromJson(Map<String, dynamic>.from(n as Map)))
+            .toList(),
+        deferReason: j['deferReason'] as String?,
       );
+}
+
+/// ملاحظة نقاش على بند (لا تغيّر نص البند، وهي جزء من سجل القرار)
+class ClauseNote {
+  final String author;
+  final String text;
+  final DateTime at;
+
+  const ClauseNote({required this.author, required this.text, required this.at});
+
+  Map<String, dynamic> toJson() => {'author': author, 'text': text, 'at': at.toUtc().toIso8601String()};
+
+  factory ClauseNote.fromJson(Map<String, dynamic> j) => ClauseNote(
+        author: j['author'] as String? ?? '',
+        text: j['text'] as String? ?? '',
+        at: DateTime.tryParse(j['at']?.toString() ?? '') ?? DateTime.now(),
+      );
+}
+
+/// إعدادات التصويت (A11): تُنسخ إلى الجلسة عند إنشائها حتى لا يغيّرها تعديل لاحق
+class VotingSettings {
+  /// الحد الأدنى للحصص المشاركة حتى يُعتد بالقرار بعد انتهاء المهلة
+  final double quorum;
+
+  /// مهلة التصويت على البند بالأيام تبدأ من أول صوت
+  final int deadlineDays;
+
+  /// عدد الجولات الفاشلة المتتالية الذي يُعد جموداً
+  final int deadlockAfter;
+
+  const VotingSettings({this.quorum = 50, this.deadlineDays = 7, this.deadlockAfter = 2});
+
+  static const defaults = VotingSettings();
+
+  Map<String, dynamic> toJson() => {'quorum': quorum, 'deadlineDays': deadlineDays, 'deadlockAfter': deadlockAfter};
+
+  factory VotingSettings.fromJson(Map<String, dynamic>? j) => j == null
+      ? defaults
+      : VotingSettings(
+          quorum: (j['quorum'] as num?)?.toDouble() ?? 50,
+          deadlineDays: (j['deadlineDays'] as num?)?.toInt() ?? 7,
+          deadlockAfter: (j['deadlockAfter'] as num?)?.toInt() ?? 2,
+        );
 }
 
 /// شريك مؤسس ضمن جلسة العقد
@@ -407,19 +490,45 @@ class Witness {
   final String nationalId;
   final bool internal; // من داخل الشركة أو خارجها
   final String? signaturePng; // base64
+  final String phone; // الشاهد المدعو يشهد من جواله برقمه هذا
+  final String? draftHash; // إصدار العقد الذي شهد عليه
+  final DateTime? attestedAt;
+  final ConfirmMethod? method;
 
   const Witness({
     required this.name,
     required this.nationalId,
     required this.internal,
     this.signaturePng,
+    this.phone = '',
+    this.draftHash,
+    this.attestedAt,
+    this.method,
   });
+
+  /// شهد فعلاً (وقّع) أم ما زال مدعواً فقط
+  bool get attested => signaturePng != null;
+
+  Witness attest({required String signature, required String hash, required ConfirmMethod by}) => Witness(
+        name: name,
+        nationalId: nationalId,
+        internal: internal,
+        phone: phone,
+        signaturePng: signature,
+        draftHash: hash,
+        attestedAt: DateTime.now(),
+        method: by,
+      );
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'nationalId': nationalId,
         'internal': internal,
         'signaturePng': signaturePng,
+        'phone': phone,
+        'draftHash': draftHash,
+        'attestedAt': attestedAt?.toUtc().toIso8601String(),
+        'method': method?.name,
       };
 
   factory Witness.fromJson(Map<String, dynamic> j) => Witness(
@@ -427,6 +536,10 @@ class Witness {
         nationalId: j['nationalId'] as String,
         internal: j['internal'] as bool? ?? false,
         signaturePng: j['signaturePng'] as String?,
+        phone: j['phone'] as String? ?? '',
+        draftHash: j['draftHash'] as String?,
+        attestedAt: j['attestedAt'] == null ? null : DateTime.tryParse(j['attestedAt'].toString()),
+        method: j['method'] == null ? null : ConfirmMethod.values.byName(j['method'] as String),
       );
 }
 
@@ -437,11 +550,15 @@ class PartnerSignOff {
   final DateTime at;
   final ConfirmMethod method;
 
+  /// بصمة مسودة العقد لحظة التوقيع: التوقيع يخص هذا الإصدار تحديداً
+  final String draftHash;
+
   const PartnerSignOff({
     required this.partnerId,
     required this.signaturePng,
     required this.at,
     required this.method,
+    this.draftHash = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -449,6 +566,7 @@ class PartnerSignOff {
         'signaturePng': signaturePng,
         'at': at.toIso8601String(),
         'method': method.name,
+        'draftHash': draftHash,
       };
 
   factory PartnerSignOff.fromJson(Map<String, dynamic> j) => PartnerSignOff(
@@ -456,6 +574,7 @@ class PartnerSignOff {
         signaturePng: j['signaturePng'] as String,
         at: DateTime.parse(j['at'] as String),
         method: ConfirmMethod.values.byName(j['method'] as String),
+        draftHash: j['draftHash'] as String? ?? '',
       );
 }
 
@@ -492,6 +611,7 @@ class ContractSession {
   final DateTime createdAt;
   DateTime updatedAt;
   int sittings; // عدد الجلسات (كل استئناف بعد تعليق = جلسة جديدة)
+  VotingSettings settings;
   List<Witness> witnesses;
   Map<String, PartnerSignOff> signOffs;
   DateTime? completedAt;
@@ -512,6 +632,7 @@ class ContractSession {
     required this.createdAt,
     required this.updatedAt,
     this.sittings = 1,
+    this.settings = VotingSettings.defaults,
     List<Witness>? witnesses,
     Map<String, PartnerSignOff>? signOffs,
     this.completedAt,
@@ -544,6 +665,7 @@ class ContractSession {
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         'sittings': sittings,
+        'settings': settings.toJson(),
         'witnesses': witnesses.map((w) => w.toJson()).toList(),
         'signOffs': signOffs.map((k, v) => MapEntry(k, v.toJson())),
         'completedAt': completedAt?.toIso8601String(),
@@ -567,6 +689,7 @@ class ContractSession {
         createdAt: DateTime.parse(j['createdAt'] as String),
         updatedAt: DateTime.parse(j['updatedAt'] as String),
         sittings: j['sittings'] as int? ?? 1,
+        settings: VotingSettings.fromJson(j['settings'] == null ? null : Map<String, dynamic>.from(j['settings'] as Map)),
         witnesses: (j['witnesses'] as List? ?? [])
             .map((w) => Witness.fromJson(w as Map<String, dynamic>))
             .toList(),
@@ -583,19 +706,31 @@ class ContractSession {
 
 /// نتيجة احتساب النصاب لبند
 class QuorumResult {
-  final double agreeShare; // نسبة الحصص الموافقة
+  final double agreeShare; // نسبة الحصص الموافقة من إجمالي الحصص
   final double disagreeShare;
   final double neutralShare;
-  final double required;
+  final double required; // العتبة
+  final double quorum; // الحد الأدنى للمشاركة
   final bool complete; // صوّت كل من يحق له التصويت
-  final bool passed;
+  final bool passed; // بلغت الموافقة العتبة
+  final DateTime? deadline;
+  final bool deadlinePassed;
 
   const QuorumResult({
     required this.agreeShare,
     required this.disagreeShare,
     required this.neutralShare,
     required this.required,
+    this.quorum = 0,
     required this.complete,
     required this.passed,
+    this.deadline,
+    this.deadlinePassed = false,
   });
+
+  double get participation => agreeShare + disagreeShare + neutralShare;
+  bool get quorumMet => participation + 1e-6 >= quorum;
+
+  /// هل يمكن حسم البند الآن: صوّت الجميع، أو انتهت المهلة
+  bool get decidable => complete || deadlinePassed;
 }

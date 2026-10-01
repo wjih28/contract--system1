@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/question_bank.dart';
+import '../models/company.dart' show ActorType;
 import '../models/questionnaire.dart';
 import '../services/cloud_sync.dart';
 import '../services/phone.dart';
@@ -17,6 +18,7 @@ import '../widgets/common_widgets.dart';
 /// - محلي: جهاز واحد، والجلسات محفوظة على الجهاز.
 /// - خادم (Firebase): كل شريك يصوّت ويوقّع من جواله، والأصوات تُزامَن لحظياً.
 /// في وضع الخادم تُشتق حالة كل بند من الأصوات نفسها، فلا يحدث تعارض بين الأجهزة.
+
 /// مستقبِل أحداث التدقيق (تربطه الواجهة بسجل تدقيق الشركة)
 typedef AuditSink = void Function(
   String companyId, {
@@ -25,6 +27,7 @@ typedef AuditSink = void Function(
   required String objectId,
   String result,
   String? evidenceRef,
+  ActorType actorType,
 });
 
 class ContractState extends ChangeNotifier {
@@ -32,10 +35,20 @@ class ContractState extends ChangeNotifier {
   AuditSink? auditSink;
 
   void _audit(ContractSession s, String action,
-      {String objectType = 'clause', required String objectId, String result = '', String? evidence}) {
+      {String objectType = 'clause',
+      required String objectId,
+      String result = '',
+      String? evidence,
+      bool actorSystem = false}) {
     final cid = s.companyId;
     if (cid == null) return;
-    auditSink?.call(cid, action: action, objectType: objectType, objectId: objectId, result: result, evidenceRef: evidence);
+    auditSink?.call(cid,
+        action: action,
+        objectType: objectType,
+        objectId: objectId,
+        result: result,
+        evidenceRef: evidence,
+        actorType: actorSystem ? ActorType.system : ActorType.user);
   }
 
   String _title(ClauseRecord r) => question(r.questionId).title;
@@ -65,17 +78,34 @@ class ContractState extends ChangeNotifier {
   CloudSync? _cloud;
   String? myPhone;
   String? _myUid;
-  StreamSubscription? _sessionsSub;
-  final Map<String, StreamSubscription> _voteSubs = {};
-  final Map<String, StreamSubscription> _signSubs = {};
+  final List<StreamSubscription> _querySubs = [];
+  final Map<String, List<StreamSubscription>> _docSubs = {};
   final Map<String, Map<String, dynamic>> _docs = {};
   final Map<String, List<Map<String, dynamic>>> _votes = {};
   final Map<String, List<Map<String, dynamic>>> _signs = {};
+  final Map<String, List<Map<String, dynamic>>> _attest = {};
+  // معرّفات الجلسات حسب مصدرها: عضوية الشركة أو دعوة الشاهد
+  final Map<String, Set<String>> _idsBySource = {'member': {}, 'witness': {}};
 
   bool get isCloud => _cloud != null;
 
   /// هل يستطيع مستخدم هذا الجهاز التصويت أو التوقيع باسم هذا الشريك؟
   bool canActAs(SessionPartner p) => !isCloud || normalizePhone(p.phone) == myPhone;
+
+  /// هل يستطيع مستخدم هذا الجهاز الشهادة باسم هذا الشاهد؟
+  bool canAttestAs(Witness w) => !isCloud || (w.phone.isNotEmpty && w.phone == myPhone);
+
+  /// جلسات دُعي فيها المستخدم شاهداً (مهامه المهنية R07)
+  List<ContractSession> get witnessTasks => sessions
+      .where((s) => s.status != SessionStatus.completed && s.witnesses.any((w) => w.phone == myPhone && !w.attested))
+      .toList();
+
+  Timer? _ticker;
+
+  /// مؤقت دوري يحسم البنود التي انتهت مهلتها
+  void startTicker() {
+    _ticker ??= Timer.periodic(const Duration(minutes: 1), (_) => refreshDeadlines());
+  }
 
   Future<void> attachCloud(CloudSync cloud, {required String phone, required String uid}) async {
     await detachCloud();
@@ -85,51 +115,67 @@ class ContractState extends ChangeNotifier {
     sessions = [];
     loaded = false;
     notifyListeners();
-    _sessionsSub = cloud.mySessions(phone).listen(_onSessions, onError: (e) {
+    void onError(Object e) {
       debugPrint('تعذر قراءة الجلسات من الخادم: $e');
       loaded = true;
       notifyListeners();
-    });
+    }
+
+    _querySubs.add(cloud.mySessions(phone).listen((q) => _onSessions('member', q), onError: onError));
+    _querySubs.add(cloud.witnessSessions(phone).listen((q) => _onSessions('witness', q), onError: onError));
   }
 
   Future<void> detachCloud() async {
-    await _sessionsSub?.cancel();
-    for (final s in [..._voteSubs.values, ..._signSubs.values]) {
+    for (final s in _querySubs) {
       await s.cancel();
     }
-    _voteSubs.clear();
-    _signSubs.clear();
+    _querySubs.clear();
+    for (final list in _docSubs.values) {
+      for (final s in list) {
+        await s.cancel();
+      }
+    }
+    _docSubs.clear();
     _docs.clear();
     _votes.clear();
     _signs.clear();
+    _attest.clear();
+    for (final ids in _idsBySource.values) {
+      ids.clear();
+    }
     _cloud = null;
     myPhone = null;
     _myUid = null;
   }
 
-  void _onSessions(QuerySnapshot<Map<String, dynamic>> snap) {
-    final ids = snap.docs.map((d) => d.id).toSet();
-    for (final gone in _docs.keys.where((k) => !ids.contains(k)).toList()) {
+  void _onSessions(String source, QuerySnapshot<Map<String, dynamic>> snap) {
+    _idsBySource[source] = snap.docs.map((d) => d.id).toSet();
+    final all = _idsBySource.values.expand((x) => x).toSet();
+    for (final gone in _docs.keys.where((k) => !all.contains(k)).toList()) {
       _docs.remove(gone);
-      _voteSubs.remove(gone)?.cancel();
-      _signSubs.remove(gone)?.cancel();
+      for (final s in _docSubs.remove(gone) ?? const <StreamSubscription>[]) {
+        s.cancel();
+      }
     }
     for (final d in snap.docs) {
       _docs[d.id] = d.data();
-      _voteSubs.putIfAbsent(
-        d.id,
-        () => _cloud!.votes(d.id).listen((v) {
-          _votes[d.id] = v.docs.map((e) => e.data()).toList();
-          _rebuildAll();
-        }),
-      );
-      _signSubs.putIfAbsent(
-        d.id,
-        () => _cloud!.signoffs(d.id).listen((v) {
-          _signs[d.id] = v.docs.map((e) => {...e.data(), 'partnerId': e.id}).toList();
-          _rebuildAll();
-        }),
-      );
+      _docSubs.putIfAbsent(d.id, () {
+        final id = d.id;
+        return [
+          _cloud!.votes(id).listen((v) {
+            _votes[id] = v.docs.map((e) => e.data()).toList();
+            _rebuildAll();
+          }),
+          _cloud!.signoffs(id).listen((v) {
+            _signs[id] = v.docs.map((e) => {...e.data(), 'partnerId': e.id}).toList();
+            _rebuildAll();
+          }),
+          _cloud!.attestations(id).listen((v) {
+            _attest[id] = v.docs.map((e) => {...e.data(), 'phone': e.id}).toList();
+            _rebuildAll();
+          }),
+        ];
+      });
     }
     loaded = true;
     _rebuildAll();
@@ -137,7 +183,13 @@ class ContractState extends ChangeNotifier {
 
   void _rebuildAll() {
     sessions = _docs.entries
-        .map((e) => sessionFromRemote(e.key, e.value, _votes[e.key] ?? const [], _signs[e.key] ?? const []))
+        .map((e) => sessionFromRemote(
+              e.key,
+              e.value,
+              _votes[e.key] ?? const [],
+              _signs[e.key] ?? const [],
+              _attest[e.key] ?? const [],
+            ))
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     notifyListeners();
@@ -161,6 +213,9 @@ class ContractState extends ChangeNotifier {
       'customQuestions': _customQuestions.where((q) => used.contains(q.id)).map((q) => q.toJson()).toList(),
       'status': s.status.name,
       'sittings': s.sittings,
+      'settings': s.settings.toJson(),
+      // الشهود المدعوون يقرؤون الجلسة ويشهدون من جوالاتهم
+      'witnessPhones': s.witnesses.map((w) => w.phone).where((p) => p.isNotEmpty).toList(),
       'witnesses': s.witnesses.map((w) => w.toJson()).toList(),
       'createdAt': s.createdAt.toUtc().toIso8601String(),
       'updatedAt': s.updatedAt.toUtc().toIso8601String(),
@@ -175,6 +230,10 @@ class ContractState extends ChangeNotifier {
         'concernedPartnerId': r.concernedPartnerId,
         'value': r.value,
         'round': r.round,
+        'openedAt': r.openedAt?.toUtc().toIso8601String(),
+        'failures': r.failures,
+        'notes': r.notes.map((n) => n.toJson()).toList(),
+        'deferReason': r.deferReason,
         'flag': switch (r.status) {
           ClauseStatus.deferred => 'deferred',
           ClauseStatus.neutralized => 'neutralized',
@@ -189,8 +248,9 @@ class ContractState extends ChangeNotifier {
     String id,
     Map<String, dynamic> d,
     List<Map<String, dynamic>> votes,
-    List<Map<String, dynamic>> signs,
-  ) {
+    List<Map<String, dynamic>> signs, [
+    List<Map<String, dynamic>> attestations = const [],
+  ]) {
     for (final q in (d['customQuestions'] as List? ?? [])) {
       final bq = BankQuestion.fromJson(Map<String, dynamic>.from(q as Map));
       _remoteQuestions[bq.id] = bq;
@@ -212,6 +272,8 @@ class ContractState extends ChangeNotifier {
       createdAt: remoteTime(d['createdAt']),
       updatedAt: remoteTime(d['updatedAt']),
       sittings: (d['sittings'] as num?)?.toInt() ?? 1,
+      settings: VotingSettings.fromJson(
+          d['settings'] == null ? null : Map<String, dynamic>.from(d['settings'] as Map)),
       witnesses: (d['witnesses'] as List? ?? [])
           .map((w) => Witness.fromJson(Map<String, dynamic>.from(w as Map)))
           .toList(),
@@ -242,6 +304,12 @@ class ContractState extends ChangeNotifier {
         concernedPartnerId: m['concernedPartnerId'] as String?,
         value: (m['value'] as num?)?.toDouble(),
         round: (m['round'] as num?)?.toInt() ?? 1,
+        openedAt: m['openedAt'] == null ? null : remoteTime(m['openedAt']),
+        failures: (m['failures'] as num?)?.toInt() ?? 0,
+        notes: (m['notes'] as List? ?? [])
+            .map((n) => ClauseNote.fromJson(Map<String, dynamic>.from(n as Map)))
+            .toList(),
+        deferReason: m['deferReason'] as String?,
       );
       for (final v in votes) {
         if ((v['round'] as num?)?.toInt() != r.round) continue;
@@ -264,13 +332,7 @@ class ContractState extends ChangeNotifier {
           r.status = ClauseStatus.neutralized;
           r.resolvedAt = m['flagAt'] == null ? null : remoteTime(m['flagAt']);
         default:
-          s.records.add(r); // مؤقتاً لحساب النصاب
-          final res = quorum(s, r);
-          s.records.removeLast();
-          if (res.complete) {
-            r.status = res.passed ? ClauseStatus.agreed : ClauseStatus.rejected;
-            r.resolvedAt = r.votes.values.map((v) => v.at).reduce((a, b) => a.isAfter(b) ? a : b);
-          }
+          _applyDerived(s, r);
       }
       s.records.add(r);
     }
@@ -282,6 +344,23 @@ class ContractState extends ChangeNotifier {
         signaturePng: so['signaturePng'] as String,
         at: remoteTime(so['at']),
         method: ConfirmMethod.values.byName(so['method'] as String),
+        draftHash: so['draftHash'] as String? ?? '',
+      );
+    }
+    // شهادات الشهود المسجلة من جوالاتهم
+    for (final a in attestations) {
+      final i = s.witnesses.indexWhere((w) => w.phone == a['phone']);
+      if (i < 0) continue;
+      final w = s.witnesses[i];
+      s.witnesses[i] = Witness(
+        name: w.name,
+        nationalId: w.nationalId,
+        internal: w.internal,
+        phone: w.phone,
+        signaturePng: a['signaturePng'] as String?,
+        draftHash: a['draftHash'] as String?,
+        attestedAt: remoteTime(a['at']),
+        method: ConfirmMethod.values.byName(a['method'] as String),
       );
     }
     return s;
@@ -318,6 +397,8 @@ class ContractState extends ChangeNotifier {
       debugPrint('تعذر تحميل الجلسات المحفوظة: $e');
     }
     if (!isCloud) loaded = true;
+    refreshDeadlines();
+    startTicker();
     notifyListeners();
   }
 
@@ -371,6 +452,7 @@ class ContractState extends ChangeNotifier {
     required AppCurrency currency,
     required double capital,
     required List<SessionPartner> partners,
+    VotingSettings settings = VotingSettings.defaults,
   }) {
     final records = <ClauseRecord>[];
     for (final q in bank) {
@@ -404,6 +486,7 @@ class ContractState extends ChangeNotifier {
       records: records,
       createdAt: now,
       updatedAt: now,
+      settings: settings,
     );
     sessions.insert(0, s);
     if (isCloud) {
@@ -443,14 +526,68 @@ class ContractState extends ChangeNotifier {
     final neutral = total == 0 ? 0.0 : share(Ballot.neutral) / total * 100;
     final required = private ? 100.0 : q.quorum.percent;
     final complete = list.every((p) => r.votes.containsKey(p.id));
+    final deadline = r.openedAt?.add(Duration(days: s.settings.deadlineDays));
     return QuorumResult(
       agreeShare: agree,
       disagreeShare: disagree,
       neutralShare: neutral,
       required: required,
+      // البند الخاص يحتاج مشاركة صاحبه، والعام يحتاج الحد الأدنى من الحصص
+      quorum: private ? 100.0 : s.settings.quorum,
       complete: complete,
       passed: agree + 1e-6 >= required,
+      deadline: deadline,
+      deadlinePassed: deadline != null && now().isAfter(deadline),
     );
+  }
+
+  /// الساعة المستخدمة في احتساب المهل (قابلة للتبديل في الاختبارات)
+  DateTime Function() now = DateTime.now;
+
+  /// حالة البند المشتقة من الأصوات والمهلة:
+  /// - صوّت الجميع: معتمد إن بلغت الموافقة العتبة، وإلا مرفوض.
+  /// - انتهت المهلة: تعذّر النصاب إن لم تبلغ المشاركة الحد الأدنى، وإلا يُحسم بالأصوات المسجلة
+  ///   (عدم التصويت لا يُحتسب موافقة لأن العتبة من إجمالي الحصص).
+  /// - تكرار الفشل حتى حد الجمود: جمود.
+  ClauseStatus deriveStatus(ContractSession s, ClauseRecord r) {
+    if (r.status == ClauseStatus.deferred || r.status == ClauseStatus.neutralized) return r.status;
+    final q = quorum(s, r);
+    if (!q.decidable) return ClauseStatus.pending;
+    if (q.passed && q.quorumMet) return ClauseStatus.agreed;
+    final failed = q.quorumMet ? ClauseStatus.rejected : ClauseStatus.quorumFailed;
+    return r.failures + 1 >= s.settings.deadlockAfter ? ClauseStatus.deadlock : failed;
+  }
+
+  void _applyDerived(ContractSession s, ClauseRecord r) {
+    final st = deriveStatus(s, r);
+    if (st == r.status) return;
+    r.status = st;
+    r.resolvedAt = st == ClauseStatus.pending
+        ? null
+        : (r.votes.isEmpty ? now() : r.votes.values.map((v) => v.at).reduce((a, b) => a.isAfter(b) ? a : b));
+  }
+
+  /// إعادة احتساب البنود التي انتهت مهلتها (يُستدعى دورياً وعند فتح الشاشات)
+  bool refreshDeadlines() {
+    var changed = false;
+    for (final s in sessions) {
+      if (s.status == SessionStatus.completed) continue;
+      for (final r in s.records) {
+        if (r.status != ClauseStatus.pending) continue;
+        final before = r.status;
+        _applyDerived(s, r);
+        if (r.status != before) {
+          changed = true;
+          _audit(s, 'انتهت مهلة التصويت على: ${_title(r)}', objectId: r.key, result: r.status.label,
+              actorSystem: true);
+        }
+      }
+    }
+    if (changed) {
+      notifyListeners();
+      _persist();
+    }
+    return changed;
   }
 
   void castVote(
@@ -466,14 +603,12 @@ class ContractState extends ChangeNotifier {
       at: DateTime.now(),
       method: method,
     );
-    final result = quorum(s, r);
-    if (result.complete) {
-      r.status = result.passed ? ClauseStatus.agreed : ClauseStatus.rejected;
-      r.resolvedAt = DateTime.now();
-    } else {
-      r.status = ClauseStatus.pending;
-      r.resolvedAt = null;
-    }
+    // أول صوت في الجولة يبدأ مهلة التصويت
+    final opened = r.openedAt == null;
+    r.openedAt ??= now();
+    r.status = ClauseStatus.pending;
+    _applyDerived(s, r);
+    if (opened) _remoteRecord(s, r);
     _cloud
         ?.vote(
           sid: s.id,
@@ -515,6 +650,7 @@ class ContractState extends ChangeNotifier {
     if (r.votes.isNotEmpty) {
       r.votes.clear();
       r.round++;
+      r.openedAt = null;
     }
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
@@ -524,8 +660,11 @@ class ContractState extends ChangeNotifier {
   }
 
   void revote(ContractSession s, ClauseRecord r) {
+    // جولة فاشلة جديدة تقرّب البند من الجمود
+    if (r.status == ClauseStatus.rejected || r.status == ClauseStatus.quorumFailed) r.failures++;
     r.votes.clear();
     r.round++;
+    r.openedAt = null;
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
     _remoteRecord(s, r);
@@ -533,11 +672,13 @@ class ContractState extends ChangeNotifier {
     _touch(s);
   }
 
-  void defer(ContractSession s, ClauseRecord r) {
+  void defer(ContractSession s, ClauseRecord r, {String? reason}) {
     r.status = ClauseStatus.deferred;
     r.resolvedAt = null;
+    r.deferReason = (reason == null || reason.trim().isEmpty) ? null : reason.trim();
     _remoteRecord(s, r);
-    _audit(s, 'تأجيل البند: ${_title(r)}', objectId: r.key, result: ClauseStatus.deferred.label);
+    _audit(s, 'تأجيل البند: ${_title(r)}', objectId: r.key,
+        result: r.deferReason == null ? ClauseStatus.deferred.label : 'السبب: ${r.deferReason}');
     _touch(s);
   }
 
@@ -545,6 +686,8 @@ class ContractState extends ChangeNotifier {
   void reopen(ContractSession s, ClauseRecord r) {
     r.votes.clear();
     r.round++;
+    r.openedAt = null;
+    r.failures = 0;
     r.status = ClauseStatus.pending;
     r.resolvedAt = null;
     _remoteRecord(s, r);
@@ -586,8 +729,58 @@ class ContractState extends ChangeNotifier {
     }
   }
 
+  // ───────────── المسودة والتوقيع والشهود ─────────────
+
+  /// بصمة مسودة العقد: نصوص البنود وحالاتها وقيمها والشركاء.
+  /// التوقيع يُربط بهذه البصمة، فأي تعديل لاحق على البنود يُبطل التواقيع السابقة.
+  String draftHash(ContractSession s) => sha256
+      .convert(utf8.encode(jsonEncode({
+        'id': s.id,
+        'company': [s.companyName, s.companyType, s.currency.code, s.capital],
+        'partners': s.partners.map((p) => [p.id, p.name, p.equity]).toList(),
+        'clauses': s.records
+            .map((r) => [r.key, r.status.name, r.value, r.status == ClauseStatus.agreed ? renderClause(s, r) : null])
+            .toList(),
+      })))
+      .toString();
+
+  bool signOffValid(ContractSession s, PartnerSignOff so) => so.draftHash == draftHash(s);
+
+  bool witnessValid(ContractSession s, Witness w) => w.attested && w.draftHash == draftHash(s);
+
+  /// موانع التوقيع النهائي (P10): قائمة دقيقة بما يجب إنجازه
+  List<String> signingBlockers(ContractSession s, {int minWitnesses = 2}) {
+    final out = <String>[];
+    final open = s.records.where((r) => r.status.needsDecision).length;
+    final deferred = s.count(ClauseStatus.deferred);
+    if (open > 0) out.add('$open بنود لم تُحسم بعد');
+    if (deferred > 0) out.add('$deferred بنود مؤجلة يجب حسمها أو تحييدها');
+    return out;
+  }
+
+  /// ما يمنع الاعتماد النهائي بعد حسم البنود: التواقيع والشهود
+  List<String> finalizeBlockers(ContractSession s, {int minWitnesses = 2}) {
+    final out = signingBlockers(s);
+    final unsigned = s.partners.where((p) {
+      final so = s.signOffs[p.id];
+      return so == null || !signOffValid(s, so);
+    }).length;
+    if (unsigned > 0) out.add('$unsigned شركاء لم يوقّعوا على الإصدار الحالي');
+    final w = s.witnesses.where((x) => witnessValid(s, x)).length;
+    if (w < minWitnesses) out.add('الشهود: $w من $minWitnesses شهدوا على الإصدار الحالي');
+    return out;
+  }
+
   void signOff(ContractSession s, PartnerSignOff so) {
-    s.signOffs[so.partnerId] = so;
+    final hash = draftHash(s);
+    final bound = PartnerSignOff(
+      partnerId: so.partnerId,
+      signaturePng: so.signaturePng,
+      at: so.at,
+      method: so.method,
+      draftHash: hash,
+    );
+    s.signOffs[so.partnerId] = bound;
     _cloud
         ?.signOff(
           sid: s.id,
@@ -595,17 +788,49 @@ class ContractState extends ChangeNotifier {
           signaturePng: so.signaturePng,
           method: so.method.name,
           phone: myPhone!,
+          draftHash: hash,
         )
         .catchError((Object e) => debugPrint('تعذر حفظ التوقيع في الخادم: $e'));
     _audit(s, 'توقيع ${_partnerName(s, so.partnerId)} النهائي وإقرار الأهلية', objectType: 'contract', objectId: s.id,
-        result: 'تم التوقيع', evidence: 'تأكيد: ${so.method.label}');
+        result: 'تم التوقيع على المسودة', evidence: 'تأكيد: ${so.method.label}، بصمة المسودة ${hash.substring(0, 16)}');
     _touch(s);
   }
 
   void setWitnesses(ContractSession s, List<Witness> w) {
     s.witnesses = w;
-    _remote(s, {'witnesses': w.map((x) => x.toJson()).toList()});
+    _remote(s, {
+      'witnesses': w.map((x) => x.toJson()).toList(),
+      'witnessPhones': w.map((x) => x.phone).where((p) => p.isNotEmpty).toList(),
+    });
     _audit(s, 'تحديث الشهود', objectType: 'contract', objectId: s.id, result: '${w.length} شهود');
+    _touch(s);
+  }
+
+  /// شهادة الشاهد (R07) على الإصدار الحالي: من جهاز الجلسة محلياً، أو من جوال الشاهد في وضع الخادم
+  void attestWitness(ContractSession s, int index, {required String signature, required ConfirmMethod method}) {
+    final hash = draftHash(s);
+    final w = s.witnesses[index].attest(signature: signature, hash: hash, by: method);
+    s.witnesses = [...s.witnesses]..[index] = w;
+    if (isCloud && w.phone.isNotEmpty && w.phone == myPhone) {
+      _cloud!
+          .attest(sid: s.id, phone: w.phone, signaturePng: signature, method: method.name, draftHash: hash)
+          .catchError((Object e) => debugPrint('تعذر حفظ شهادة الشاهد: $e'));
+    } else {
+      _remote(s, {'witnesses': s.witnesses.map((x) => x.toJson()).toList()});
+    }
+    _audit(s, 'شهادة ${w.name} على العقد', objectType: 'contract', objectId: s.id,
+        result: w.internal ? 'شاهد من داخل الشركة' : 'شاهد من خارج الشركة',
+        evidence: 'تأكيد: ${method.label}، بصمة المسودة ${hash.substring(0, 16)}');
+    _touch(s);
+  }
+
+  /// ملاحظة نقاش على بند (P05/P06): لا تغيّر نص البند ولا الأصوات
+  void addNote(ContractSession s, ClauseRecord r, String text, {required String author}) {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    r.notes = [...r.notes, ClauseNote(author: author, text: t, at: now())];
+    _remoteRecord(s, r);
+    _audit(s, 'ملاحظة على: ${_title(r)}', objectId: r.key, result: t.length > 60 ? '${t.substring(0, 60)}…' : t);
     _touch(s);
   }
 
@@ -652,9 +877,11 @@ class ContractState extends ChangeNotifier {
       }).toList(),
       'signOffs': sortedSign.map((id) {
         final so = s.signOffs[id]!;
-        return [id, digest(so.signaturePng), t(so.at), so.method.name];
+        return [id, digest(so.signaturePng), t(so.at), so.method.name, so.draftHash];
       }).toList(),
-      'witnesses': s.witnesses.map((w) => [w.name, w.nationalId, w.internal, digest(w.signaturePng)]).toList(),
+      'witnesses': s.witnesses
+          .map((w) => [w.name, w.nationalId, w.internal, w.phone, digest(w.signaturePng), w.draftHash])
+          .toList(),
       'completedAt': s.completedAt == null ? null : t(s.completedAt!),
     });
   }
@@ -720,6 +947,7 @@ class ContractState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _ticker?.cancel();
     detachCloud();
     super.dispose();
   }

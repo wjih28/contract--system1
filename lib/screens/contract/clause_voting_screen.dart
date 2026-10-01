@@ -600,7 +600,7 @@ class _Outcome extends StatelessWidget {
             ),
           ],
         );
-      case ClauseStatus.rejected:
+      case ClauseStatus.rejected || ClauseStatus.quorumFailed || ClauseStatus.deadlock:
         return panel(
           color: AppColors.danger,
           icon: Icons.error_rounded,
