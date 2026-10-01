@@ -11,7 +11,7 @@ import '../../providers/company_state.dart';
 import '../../providers/contract_state.dart';
 import '../../theme/app_theme.dart';
 import '../contract/clause_voting_screen.dart';
-import '../contract/finalize_screen.dart';
+import '../establishment/contract_summary_screen.dart';
 import '../contract/session_overview_screen.dart';
 import '../establishment/deferred_screen.dart';
 import '../establishment/voting_center_screen.dart';
@@ -108,8 +108,9 @@ class PartnerDashboardScreen extends StatelessWidget {
                   color: AppColors.success,
                   title: 'وقّع على العقد',
                   subtitle: 'حُسمت كل البنود، والعقد بانتظار توقيعك.',
+                  // يبدأ التوقيع من ملخص العقد (P10) ثم صفحة التوقيع (P12)
                   onTap: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => FinalizeScreen(sessionId: s.id))),
+                      context, MaterialPageRoute(builder: (_) => ContractSummaryScreen(sessionId: s.id))),
                 ),
               ...myPending.take(6).map((r) {
                 final q = st.quorum(s, r);

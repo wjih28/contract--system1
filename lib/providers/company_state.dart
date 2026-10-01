@@ -60,7 +60,9 @@ class CompanyState extends ChangeNotifier {
   /// الوحدات الظاهرة في القائمة: حسب الدور والبوابة الحالية
   List<AppModule> get myModules {
     final allowed = Permissions.modulesFor(myRoles);
-    return AppModule.values.where((m) => allowed.contains(m) && (m.portal == portal || m.shared)).toList();
+    // وحدات البوابة أولاً ثم الوحدات المشتركة (الإشعارات، السجل، الحساب)
+    final list = AppModule.values.where((m) => allowed.contains(m) && (m.portal == portal || m.shared)).toList();
+    return [...list.where((m) => m.portal == portal && !m.shared), ...list.where((m) => !(m.portal == portal && !m.shared))];
   }
 
   bool can(AppModule m) => Permissions.can(myRoles, m);

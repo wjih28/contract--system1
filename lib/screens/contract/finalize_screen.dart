@@ -71,9 +71,13 @@ class FinalizeScreen extends StatelessWidget {
                       children: [
                         const Text('الإصدار المعروض للتوقيع',
                             style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w800)),
-                        Text('مرجع سلامة المسودة: ${hash.substring(0, 16)}…',
-                            textDirection: TextDirection.ltr,
-                            style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                        Row(children: [
+                          const Text('مرجع سلامة المسودة: ',
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                          Text('${hash.substring(0, 16)}…',
+                              textDirection: TextDirection.ltr,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+                        ]),
                       ],
                     ),
                   ),

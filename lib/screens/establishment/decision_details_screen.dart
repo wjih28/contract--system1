@@ -149,7 +149,7 @@ class _DecisionDetailsScreenState extends State<DecisionDetailsScreen> {
                 r.concernedPartnerId != null
                     ? 'بند خاص: يُعتمد بموافقة ${partner?.name ?? 'الشريك المعني'} وحده (100%).'
                     : 'حصص الموافقين $agreeEquity ÷ إجمالي الحصص $totalEquity = '
-                        '${totalEquity == 0 ? 0 : (agreeEquity / totalEquity * 100).toStringAsFixed(4)}%\n'
+                        '${totalEquity == 0 ? 0 : (agreeEquity / totalEquity * 100).toStringAsFixed(2)}%\n'
                         'العتبة المطلوبة ${res.required}%، والحد الأدنى للمشاركة ${res.quorum}%.\n'
                         'المحايد وعدم التصويت لا يُحتسبان موافقة. المهلة ${s.settings.deadlineDays} أيام من أول صوت، '
                         'والجمود بعد ${s.settings.deadlockAfter} جولات فاشلة متتالية.',
