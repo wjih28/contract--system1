@@ -60,6 +60,13 @@ class ContractState extends ChangeNotifier {
   List<ContractSession> sessionsFor(String? companyId) =>
       sessions.where((s) => s.companyId == companyId).toList();
 
+  /// توقيع تعديل البند (الجولة + التأجيل/التحييد) لاكتشاف تعارض التحديث بين الأجهزة
+  static String editSig(ClauseRecord r) => '${r.key}:${r.round}:'
+      '${r.status == ClauseStatus.deferred || r.status == ClauseStatus.neutralized ? r.status.name : '-'}';
+
+  /// آخر تعديل قام به هذا الجهاز، حتى لا يُعرض كتعارض
+  String? lastLocalEdit;
+
   /// جلسة التأسيس للشركة (واحدة لكل شركة)
   ContractSession? establishmentFor(String? companyId) =>
       companyId == null ? null : sessions.where((s) => s.companyId == companyId).firstOrNull;
@@ -388,8 +395,10 @@ class ContractState extends ChangeNotifier {
     _cloud?.update(s.id, fields).catchError((Object e) => debugPrint('تعذر حفظ التعديل في الخادم: $e'));
   }
 
-  void _remoteRecord(ContractSession s, ClauseRecord r) =>
-      _remote(s, {FieldPath(['records', r.key]): _recordToRemote(r)});
+  void _remoteRecord(ContractSession s, ClauseRecord r) {
+    lastLocalEdit = editSig(r);
+    _remote(s, {FieldPath(['records', r.key]): _recordToRemote(r)});
+  }
 
   // ───────────── التخزين المحلي ─────────────
 

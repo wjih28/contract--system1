@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../design/components.dart';
+import '../../design/state_view.dart';
 import '../../models/questionnaire.dart';
 import '../../providers/contract_state.dart';
 import '../../services/identity_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../establishment/decision_details_screen.dart';
 
 /// شاشة التصويت على بند واحد: نص البند، السؤال التوعوي، القيمة، أصوات الشركاء، النصاب
 class ClauseVotingScreen extends StatefulWidget {
@@ -22,6 +25,10 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
   late int _index = widget.initialIndex;
   final _scroll = ScrollController();
 
+  /// توقيع حالة البند عند فتحه: إن تغيّرت الجولة أو التأجيل/التحييد من جهاز آخر نعرض تنبيه تعارض
+  String? _seen;
+  String _sig(ClauseRecord r) => ContractState.editSig(r);
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -29,7 +36,10 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
   }
 
   void _go(int i) {
-    setState(() => _index = i);
+    setState(() {
+      _index = i;
+      _seen = null;
+    });
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
@@ -47,10 +57,25 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
         ? null
         : s.partners.where((p) => p.id == r.concernedPartnerId).firstOrNull;
     final open = r.status == ClauseStatus.pending;
+    // أفعالي على البند (تعديل قيمة، إعادة تصويت، تأجيل...) تتغير بها الجولة، فلا تُعد تعارضاً
+    if (_seen == null || state.lastLocalEdit == _sig(r)) _seen = _sig(r);
 
     return Scaffold(
       appBar: AppBar(
         title: Text('البند ${_index + 1} من $total'),
+        actions: [
+          if (s.status != SessionStatus.completed && s.status != SessionStatus.suspended)
+            IconButton(
+              tooltip: 'تعليق الجلسة',
+              icon: const Icon(Icons.pause_circle_outline_rounded),
+              onPressed: () {
+                state.suspend(s);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('عُلّقت الجلسة، وكل ما تم محفوظ. يمكن استئنافها في أي وقت.')));
+              },
+            ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(6),
           child: LinearProgressIndicator(
@@ -69,6 +94,10 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
                 controller: _scroll,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 children: [
+                  if (_seen != null && _seen != _sig(r))
+                    StateBanner.conflict(onRefresh: () => setState(() => _seen = _sig(r))),
+                  _ProgressHeader(session: s, record: r, savedAt: s.updatedAt),
+                  const SizedBox(height: 12),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
@@ -104,8 +133,26 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
                       enabled: open,
                     ),
                   ],
-                  const SizedBox(height: 18),
-                  _QuorumMeter(result: result, private: concerned != null, quorumLabel: q.quorum.display),
+                  Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: TextButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => DecisionDetailsScreen(sessionId: s.id, recordKey: r.key)),
+                      ),
+                      icon: const Icon(Icons.info_outline_rounded, size: 18),
+                      label: Text('التفاصيل الكاملة والسجل${r.notes.isEmpty ? '' : ' (${r.notes.length} ملاحظات)'}'),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ApprovalPanel(
+                    threshold: result.required,
+                    quorum: result.quorum,
+                    agree: result.agreeShare,
+                    disagree: result.disagreeShare,
+                    neutral: result.neutralShare,
+                    deadline: result.deadline,
+                  ),
                   const SizedBox(height: 18),
                   SectionHeader(title: concerned == null ? 'أصوات الشركاء' : 'تراضي الشريك المعني'),
                   const SizedBox(height: 8),
@@ -139,8 +186,11 @@ class _ClauseVotingScreenState extends State<ClauseVotingScreen> {
               canDefer: open,
               onPrev: () => _go(_index - 1),
               onNext: () => _go(_index + 1),
-              onDefer: () {
-                state.defer(s, r);
+              onDefer: () async {
+                final reason = await askDeferReason(context);
+                if (reason == null || !context.mounted) return;
+                state.defer(s, r, reason: reason);
+                _seen = _sig(r);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('تم نقل البند إلى قائمة المؤجلات')),
                 );
@@ -174,12 +224,7 @@ class _ClauseText extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.navySurface,
         borderRadius: BorderRadius.circular(18),
-        border: Border(
-          right: const BorderSide(color: AppColors.gold, width: 4),
-          top: BorderSide(color: AppColors.divider),
-          bottom: BorderSide(color: AppColors.divider),
-          left: BorderSide(color: AppColors.divider),
-        ),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -317,95 +362,6 @@ class _ValueEditorState extends State<_ValueEditor> {
       ),
     );
   }
-}
-
-class _QuorumMeter extends StatelessWidget {
-  final QuorumResult result;
-  final bool private;
-  final String quorumLabel;
-  const _QuorumMeter({required this.result, required this.private, required this.quorumLabel});
-
-  @override
-  Widget build(BuildContext context) {
-    return GoldBorderCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Text('النصاب المطلوب',
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              Text(private ? 'تراضي فردي (100%)' : quorumLabel,
-                  style: const TextStyle(color: AppColors.gold, fontWeight: FontWeight.w800, fontSize: 13)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(builder: (context, c) {
-            final w = c.maxWidth;
-            return SizedBox(
-              height: 22,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.navyLight,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Row(
-                      children: [
-                        _seg(w, result.agreeShare, Ballot.agree.color),
-                        _seg(w, result.neutralShare, Ballot.neutral.color),
-                        _seg(w, result.disagreeShare, Ballot.disagree.color),
-                      ],
-                    ),
-                  ),
-                  // خط النصاب المطلوب
-                  PositionedDirectional(
-                    start: (w * result.required / 100).clamp(0, w - 2),
-                    top: -4,
-                    bottom: -4,
-                    child: Container(width: 2.5, color: AppColors.goldLight),
-                  ),
-                ],
-              ),
-            );
-          }),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _legend(Ballot.agree, result.agreeShare),
-              _legend(Ballot.neutral, result.neutralShare),
-              _legend(Ballot.disagree, result.disagreeShare),
-            ],
-          ),
-          if (!private) ...[
-            const SizedBox(height: 6),
-            const Text('الأصوات مرجّحة بحصة كل شريك في رأس المال، والمحايد لا يُحتسب موافقة.',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 10.5)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _seg(double w, double pct, Color c) =>
-      AnimatedContainer(duration: const Duration(milliseconds: 300), width: w * pct / 100, color: c);
-
-  Widget _legend(Ballot b, double v) => Expanded(
-        child: Row(
-          children: [
-            Container(width: 8, height: 8, decoration: BoxDecoration(color: b.color, shape: BoxShape.circle)),
-            const SizedBox(width: 5),
-            Text('${b.label} ${v.toStringAsFixed(v % 1 == 0 ? 0 : 1)}%',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
-          ],
-        ),
-      );
 }
 
 class _PartnerBallotRow extends StatelessWidget {
@@ -601,11 +557,25 @@ class _Outcome extends StatelessWidget {
           ],
         );
       case ClauseStatus.rejected || ClauseStatus.quorumFailed || ClauseStatus.deadlock:
+        String pct(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 1);
         return panel(
-          color: AppColors.danger,
-          icon: Icons.error_rounded,
-          title: 'لم يبلغ البند النصاب',
-          body: 'يمكنكم مناقشة البند وتعديل صيغته أو قيمته ثم إعادة التصويت، أو تأجيله لجلسة لاحقة، أو تحييده بالاتفاق حتى لا يعطل باقي البنود.',
+          color: st.color,
+          icon: st.icon,
+          title: switch (st) {
+            ClauseStatus.quorumFailed => 'تعذّر النصاب',
+            ClauseStatus.deadlock => 'جمود في هذا البند',
+            _ => 'لم يبلغ البند العتبة المطلوبة',
+          },
+          body: switch (st) {
+            ClauseStatus.quorumFailed =>
+              'انتهت المهلة وشاركت حصص ${pct(result.participation)}% فقط من ${pct(result.quorum)}% مطلوبة. '
+                  'هذه حالة إجرائية وليست موافقة. أعيدوا التصويت بعد التنسيق، أو أجّلوه، أو حيّدوه بالاتفاق.',
+            ClauseStatus.deadlock =>
+              'فشل التصويت ${record.failures + 1} مرات متتالية. ناقشوا البند وعدّلوا صيغته أو قيمته قبل إعادة التصويت، '
+                  'أو أجّلوه لجلسة لاحقة، أو حيّدوه بالاتفاق حتى لا يعطّل العقد. (بعد التأسيس يتحول الجمود إلى تذكرة نزاع).',
+            _ => 'بلغت الموافقة ${pct(result.agreeShare)}% من ${pct(result.required)}% مطلوبة. '
+                'يمكنكم مناقشة البند وتعديل صيغته أو قيمته ثم إعادة التصويت، أو تأجيله، أو تحييده بالاتفاق.',
+          },
           actions: [
             ElevatedButton.icon(
               onPressed: () => state.revote(session, record),
@@ -617,8 +587,10 @@ class _Outcome extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {
-                      state.defer(session, record);
+                    onPressed: () async {
+                      final reason = await askDeferReason(context);
+                      if (reason == null) return;
+                      state.defer(session, record, reason: reason);
                       onNext();
                     },
                     icon: const Icon(Icons.schedule_rounded, size: 18),
@@ -792,6 +764,62 @@ class _BottomBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// سؤال سبب التأجيل (اختياري) قبل نقل البند إلى المؤجلات
+Future<String?> askDeferReason(BuildContext context) async {
+  final c = TextEditingController();
+  final r = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('تأجيل البند لجلسة لاحقة'),
+      content: TextField(
+        controller: c,
+        autofocus: true,
+        maxLines: 2,
+        decoration: const InputDecoration(hintText: 'سبب التأجيل (اختياري)، مثل: بانتظار رأي المحاسب'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+        ElevatedButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('تأجيل')),
+      ],
+    ),
+  );
+  c.dispose();
+  return r;
+}
+
+/// رأس التقدم (P05): المحسوم من الإجمالي، القسم الحالي، غير المحسوم، وتأكيد الحفظ التلقائي
+class _ProgressHeader extends StatelessWidget {
+  final ContractSession session;
+  final ClauseRecord record;
+  final DateTime savedAt;
+  const _ProgressHeader({required this.session, required this.record, required this.savedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final st = context.read<ContractState>();
+    final s = session;
+    final done = s.count(ClauseStatus.agreed) + s.count(ClauseStatus.neutralized);
+    final unresolved = s.records.where((r) => r.status.needsDecision).length + s.count(ClauseStatus.deferred);
+    final cat = st.question(record.questionId).category;
+    final t = TimeOfDay.fromDateTime(savedAt.toLocal()).format(context);
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'محسوم $done من ${s.records.length} · القسم ${cat.label} · $unresolved غير محسوم',
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.cloud_done_rounded, size: 14, color: AppColors.success),
+          const SizedBox(width: 4),
+          Text('حُفظ تلقائياً $t', style: const TextStyle(color: AppColors.success, fontSize: 11)),
+        ]),
+      ],
     );
   }
 }
