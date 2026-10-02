@@ -22,8 +22,17 @@ import '../company/my_companies_screen.dart';
 import '../company/partner_dashboard_screen.dart';
 import '../establishment/voting_center_screen.dart';
 import '../dispute_room_screen.dart';
-import '../notifications_screen.dart';
 import '../profile_screen.dart';
+import '../../providers/operations_state.dart';
+import '../admin/channels_screen.dart';
+import '../admin/expense_limits_screen.dart';
+import '../admin/integrations_screen.dart';
+import '../admin/rule_test_screen.dart';
+import '../operations/approvals_screen.dart';
+import '../operations/notifications_center_screen.dart';
+import '../operations/ops_dashboard_screen.dart';
+import '../operations/transactions_screen.dart';
+import '../operations/violations_screen.dart';
 
 /// هيكل التطبيق الموحد للبوابات الأربع:
 /// - شريط علوي: الشركة الحالية، البوابة، الإشعارات، الحساب
@@ -47,6 +56,12 @@ class _AppShellState extends State<AppShell> {
       // شاهد مدعو من خارج الشركة: يرى مهامه فقط
       return context.watch<ContractState>().witnessTasks.isNotEmpty ? const WitnessTasksScreen() : const _NoCompany();
     }
+
+    // متابعة عمليات الشركة الحالية لحظياً (في وضع الخادم)
+    final companyId = cs.current?.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<OperationsState>().watchCompany(companyId);
+    });
 
     final modules = cs.myModules;
     if (modules.isEmpty) {
@@ -147,16 +162,10 @@ class _AppShellState extends State<AppShell> {
         AppModule.partners => const PartnersScreen(),
         AppModule.establishment => const ContractsScreen(),
         AppModule.voting => const VotingCenterScreen(),
-        AppModule.approvals => const _Upcoming(
-            title: 'الموافقات والاستثناءات',
-            message: 'مراجعة طلبات الاستثناء لمرة واحدة دون تغيير العقد. تُبنى في المرحلة 2.',
-          ),
-        AppModule.transactions => const _Upcoming(
-            title: 'العمليات والمخالفات',
-            message: 'العمليات المالية ونتيجة فحصها مقابل قواعد العقد. تُبنى في المرحلة 2.',
-          ),
+        AppModule.approvals => const ApprovalsScreen(),
+        AppModule.transactions => const TransactionsScreen(),
         AppModule.disputes => const _Demo(child: DisputeRoomScreen()),
-        AppModule.notifications => const _Demo(child: NotificationsScreen()),
+        AppModule.notifications => const NotificationsCenterScreen(),
         AppModule.profile => const ProfileScreen(),
         AppModule.questionBank => const QuestionBankScreen(),
         AppModule.clauseLibrary => const ClauseLibraryScreen(),
@@ -164,10 +173,14 @@ class _AppShellState extends State<AppShell> {
         AppModule.votingSettings => const VotingSettingsScreen(),
         AppModule.currencySettings => const CurrencySettingsScreen(),
         AppModule.auditLog => const AuditLogScreen(),
-        AppModule.operationsDashboard => const _Upcoming(
-            title: 'لوحة التشغيل',
-            message: 'بوابة المدير التنفيذي والمالي للعمليات اليومية ضمن قواعد العقد. تُبنى في المرحلتين 2 و4.',
-          ),
+        AppModule.operationsDashboard => const OpsDashboardScreen(),
+        AppModule.opsTransactions => const TransactionsScreen(),
+        AppModule.opsFrozen => const TransactionsScreen(frozenOnly: true),
+        AppModule.opsViolations => const ViolationsScreen(),
+        AppModule.ruleTest => const RuleTestScreen(),
+        AppModule.expenseLimits => const ExpenseLimitsScreen(),
+        AppModule.channels => const ChannelsScreen(),
+        AppModule.integrations => const IntegrationsScreen(),
         AppModule.professionalTasks => const WitnessTasksScreen(),
       };
 }
@@ -303,18 +316,5 @@ class _Demo extends StatelessWidget {
           Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 0), child: StateBanner.demo()),
           Expanded(child: child),
         ],
-      );
-}
-
-/// وحدة لم تُبنَ بعد: توضح موعدها في الخطة بدل شاشة فارغة
-class _Upcoming extends StatelessWidget {
-  final String title;
-  final String message;
-  const _Upcoming({required this.title, required this.message});
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: StateView.empty(icon: Icons.construction_rounded, title: 'قيد البناء', message: message),
       );
 }

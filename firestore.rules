@@ -78,6 +78,53 @@ service cloud.firestore {
           && request.resource.data.at == request.time;
         allow update, delete: if false;
       }
+
+      // ───────────── الرقابة المالية (المرحلة 2) ─────────────
+      // العملية المالية: بياناتها الأساسية لا تتغير بعد تسجيلها، وتتغير حالتها فقط
+      match /transactions/{txId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.id == txId
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'checks', 'evaluatedAt', 'contractRef', 'notes']);
+        allow delete: if false;
+      }
+
+      // طلب الاستثناء: لا يغيّر الحد الأصلي ولا المبلغ، والقرار بعد صدوره نهائي
+      match /exceptions/{exId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.status == 'pending';
+        allow update: if isCompanyMember(cid)
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['votes', 'status', 'decidedAt']);
+        allow delete: if false;
+      }
+
+      // المخالفة لا تُحذف أبداً؛ تتغير حالة معالجتها فقط
+      match /violations/{vId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'owner', 'correctiveAction', 'evidence', 'history']);
+        allow delete: if false;
+      }
+
+      // الإشعار: نصه ودليل تسليمه ثابتان، ويتغير فقط وسم القراءة
+      match /notifications/{nId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+        allow delete: if false;
+      }
     }
 
     // ───────────── جلسات التأسيس ─────────────

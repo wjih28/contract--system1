@@ -83,6 +83,13 @@ enum AppModule {
   auditLog,
   // التشغيل
   operationsDashboard,
+  opsTransactions,
+  opsFrozen,
+  opsViolations,
+  ruleTest,
+  expenseLimits,
+  channels,
+  integrations,
   // الأطراف المهنية
   professionalTasks,
 }
@@ -105,6 +112,13 @@ extension AppModuleX on AppModule {
         AppModule.currencySettings => 'العملات',
         AppModule.auditLog => 'سجل التدقيق',
         AppModule.operationsDashboard => 'لوحة التشغيل',
+        AppModule.opsTransactions => 'العمليات المالية',
+        AppModule.opsFrozen => 'العمليات المجمّدة',
+        AppModule.opsViolations => 'المخالفات',
+        AppModule.ruleTest => 'اختبار القواعد',
+        AppModule.expenseLimits => 'حدود الصرف',
+        AppModule.channels => 'القنوات والقوالب',
+        AppModule.integrations => 'التكامل المحاسبي',
         AppModule.professionalTasks => 'مهامي المهنية',
       };
 
@@ -125,6 +139,13 @@ extension AppModuleX on AppModule {
         AppModule.currencySettings => Icons.currency_exchange_rounded,
         AppModule.auditLog => Icons.manage_search_rounded,
         AppModule.operationsDashboard => Icons.insights_rounded,
+        AppModule.opsTransactions => Icons.receipt_long_rounded,
+        AppModule.opsFrozen => Icons.ac_unit_rounded,
+        AppModule.opsViolations => Icons.gpp_bad_rounded,
+        AppModule.ruleTest => Icons.science_rounded,
+        AppModule.expenseLimits => Icons.speed_rounded,
+        AppModule.channels => Icons.campaign_rounded,
+        AppModule.integrations => Icons.sync_alt_rounded,
         AppModule.professionalTasks => Icons.assignment_rounded,
       };
 
@@ -139,7 +160,12 @@ extension AppModuleX on AppModule {
         AppModule.currencySettings ||
         AppModule.auditLog =>
           Portal.admin,
-        AppModule.operationsDashboard => Portal.operations,
+        AppModule.operationsDashboard ||
+        AppModule.opsTransactions ||
+        AppModule.opsFrozen ||
+        AppModule.opsViolations =>
+          Portal.operations,
+        AppModule.ruleTest || AppModule.expenseLimits || AppModule.channels || AppModule.integrations => Portal.admin,
         AppModule.professionalTasks => Portal.professional,
         _ => Portal.partner,
       };
@@ -151,6 +177,11 @@ class Permissions {
 
   static const Map<CompanyRole, Set<AppModule>> _byRole = {
     CompanyRole.managingPartner: {
+      // الشريك المدير يدير العمليات اليومية في الشركات الصغيرة حتى يُعيَّن مدير تنفيذي
+      AppModule.operationsDashboard,
+      AppModule.opsTransactions,
+      AppModule.opsFrozen,
+      AppModule.opsViolations,
       AppModule.dashboard,
       AppModule.partners,
       AppModule.establishment,
@@ -180,6 +211,10 @@ class Permissions {
       AppModule.logicRules,
       AppModule.votingSettings,
       AppModule.currencySettings,
+      AppModule.ruleTest,
+      AppModule.expenseLimits,
+      AppModule.channels,
+      AppModule.integrations,
       AppModule.auditLog,
       AppModule.profile,
     },
@@ -190,9 +225,23 @@ class Permissions {
       AppModule.auditLog,
       AppModule.profile,
     },
-    CompanyRole.executiveManager: {AppModule.operationsDashboard, AppModule.notifications, AppModule.profile},
-    CompanyRole.financialManager: {AppModule.operationsDashboard, AppModule.notifications, AppModule.profile},
-    CompanyRole.departmentManager: {AppModule.operationsDashboard, AppModule.profile},
+    CompanyRole.executiveManager: {
+      AppModule.operationsDashboard,
+      AppModule.opsTransactions,
+      AppModule.opsFrozen,
+      AppModule.opsViolations,
+      AppModule.notifications,
+      AppModule.profile,
+    },
+    CompanyRole.financialManager: {
+      AppModule.operationsDashboard,
+      AppModule.opsTransactions,
+      AppModule.opsFrozen,
+      AppModule.opsViolations,
+      AppModule.notifications,
+      AppModule.profile,
+    },
+    CompanyRole.departmentManager: {AppModule.operationsDashboard, AppModule.opsTransactions, AppModule.profile},
     CompanyRole.lawyer: {AppModule.professionalTasks, AppModule.profile},
     CompanyRole.accountant: {AppModule.professionalTasks, AppModule.profile},
     CompanyRole.witness: {AppModule.professionalTasks, AppModule.profile},
