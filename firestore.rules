@@ -59,15 +59,45 @@ service cloud.firestore {
         && myPhone() in request.resource.data.memberPhones
         && request.resource.data.createdBy == request.auth.uid;
 
-      // الأعضاء وأرقامهم ومنشئ الشركة ثابتة. جدول الحصص لا يتغير إلا مع اعتماد إصدار عقد أحدث
-      // (تعديل جدول الحصص بقرار الشركاء أو تنفيذ صلح أو حكم)
+      // مسؤول النظام: منشئ الشركة أو من يحمل دور مسؤول النظام (يعيّنه المنشئ فقط)
+      function isCompanyAdmin() {
+        return request.auth.uid == resource.data.createdBy
+          || myPhone() in resource.data.get('adminPhones', []);
+      }
+
+      function unchanged(field) {
+        return request.resource.data.get(field, null) == resource.data.get(field, null);
+      }
+
+      // حقول الإدارة (الصلاحيات، نقاط الإفصاح، الإعدادات، معالجة الأحداث) لا يغيّرها إلا مسؤول النظام،
+      // وقائمة المسؤولين لا يغيّرها إلا المنشئ
+      function adminFieldsOk() {
+        return (isCompanyAdmin()
+            || (unchanged('permissions') && unchanged('controlPoints') && unchanged('settings') && unchanged('triage')))
+          && (unchanged('adminPhones') || request.auth.uid == resource.data.createdBy);
+      }
+
+      // ثلاث حالات للتحديث:
+      // 1) تحديث عادي: الشركاء والموظفون وأرقام الوصول ثابتة
+      // 2) اعتماد إصدار عقد أحدث: يتغير جدول الحصص فقط مع نفس عدد الأعضاء
+      // 3) إدارة الموظفين (مسؤول النظام): دعوة أو إيقاف موظفين بلا حصص، والشركاء يبقون أعضاء دائماً
       allow update: if signedIn()
         && myPhone() in resource.data.memberPhones
-        && request.resource.data.memberPhones == resource.data.memberPhones
         && request.resource.data.createdBy == resource.data.createdBy
-        && (request.resource.data.members == resource.data.members
-            || (request.resource.data.contractVersion > resource.data.get("contractVersion", 0)
-                && request.resource.data.members.size() == resource.data.members.size()));
+        && unchanged('partnerPhones')
+        && adminFieldsOk()
+        && (
+          (request.resource.data.members == resource.data.members
+            && request.resource.data.memberPhones == resource.data.memberPhones
+            && unchanged('staff'))
+          || (request.resource.data.memberPhones == resource.data.memberPhones
+            && unchanged('staff')
+            && request.resource.data.contractVersion > resource.data.get('contractVersion', 0)
+            && request.resource.data.members.size() == resource.data.members.size())
+          || (isCompanyAdmin()
+            && request.resource.data.members == resource.data.members
+            && request.resource.data.memberPhones.hasAll(resource.data.get('partnerPhones', resource.data.memberPhones)))
+        );
 
       allow delete: if false;
 
@@ -117,6 +147,16 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['status', 'owner', 'correctiveAction', 'evidence', 'history']);
         allow delete: if false;
+      }
+
+      // موافقة الشريك المباشرة على إتاحة بياناته الشخصية: يكتبها صاحب الرقم فقط، ولا تُعدَّل ولا تُحذف
+      match /consents/{consentId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.phone == myPhone()
+          && myPhone() in companyData(cid).get('partnerPhones', companyData(cid).memberPhones)
+          && consentId == request.resource.data.point + '|' + request.resource.data.role + '|' + myPhone();
+        allow update, delete: if false;
       }
 
       // تذكرة النزاع (المرحلة 3): دائمة لا تُحذف، وأطرافها ومحفزها ثابتة، والمغلقة لا تُعدَّل

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'admin.dart';
 import 'questionnaire.dart';
 
 /// البوابات الأربع في المنصة
@@ -76,6 +77,13 @@ enum AppModule {
   notifications,
   profile,
   // إدارة النظام
+  adminDashboard,
+  companies,
+  users,
+  roles,
+  controlPoints,
+  securityMonitor,
+  platformSettings,
   questionBank,
   clauseLibrary,
   logicRules,
@@ -108,6 +116,13 @@ extension AppModuleX on AppModule {
         AppModule.disputes => 'النزاعات',
         AppModule.notifications => 'الإشعارات',
         AppModule.profile => 'حسابي',
+        AppModule.adminDashboard => 'لوحة الإدارة',
+        AppModule.companies => 'إدارة الشركات',
+        AppModule.users => 'مستخدمو النظام',
+        AppModule.roles => 'الأدوار والصلاحيات',
+        AppModule.controlPoints => 'نقاط الإفصاح',
+        AppModule.securityMonitor => 'الأمان والتكامل',
+        AppModule.platformSettings => 'إعدادات المنصة',
         AppModule.questionBank => 'بنك الأسئلة',
         AppModule.clauseLibrary => 'مكتبة البنود',
         AppModule.logicRules => 'القواعد المنطقية',
@@ -137,6 +152,13 @@ extension AppModuleX on AppModule {
         AppModule.disputes => Icons.gavel_rounded,
         AppModule.notifications => Icons.notifications_active_rounded,
         AppModule.profile => Icons.person_rounded,
+        AppModule.adminDashboard => Icons.dashboard_customize_rounded,
+        AppModule.companies => Icons.apartment_rounded,
+        AppModule.users => Icons.group_rounded,
+        AppModule.roles => Icons.admin_panel_settings_rounded,
+        AppModule.controlPoints => Icons.policy_rounded,
+        AppModule.securityMonitor => Icons.shield_rounded,
+        AppModule.platformSettings => Icons.settings_rounded,
         AppModule.questionBank => Icons.library_books_rounded,
         AppModule.clauseLibrary => Icons.menu_book_rounded,
         AppModule.logicRules => Icons.account_tree_rounded,
@@ -159,6 +181,13 @@ extension AppModuleX on AppModule {
   bool get shared => this == AppModule.profile || this == AppModule.auditLog || this == AppModule.notifications;
 
   Portal get portal => switch (this) {
+        AppModule.adminDashboard ||
+        AppModule.companies ||
+        AppModule.users ||
+        AppModule.roles ||
+        AppModule.controlPoints ||
+        AppModule.securityMonitor ||
+        AppModule.platformSettings ||
         AppModule.questionBank ||
         AppModule.clauseLibrary ||
         AppModule.logicRules ||
@@ -215,6 +244,13 @@ class Permissions {
       AppModule.auditLog,
     },
     CompanyRole.systemAdmin: {
+      AppModule.adminDashboard,
+      AppModule.companies,
+      AppModule.users,
+      AppModule.roles,
+      AppModule.controlPoints,
+      AppModule.securityMonitor,
+      AppModule.platformSettings,
       AppModule.questionBank,
       AppModule.clauseLibrary,
       AppModule.logicRules,
@@ -229,6 +265,7 @@ class Permissions {
       AppModule.profile,
     },
     CompanyRole.legalAdmin: {
+      AppModule.adminDashboard,
       AppModule.questionBank,
       AppModule.clauseLibrary,
       AppModule.logicRules,
@@ -263,6 +300,65 @@ class Permissions {
 
   static bool can(Iterable<CompanyRole> roles, AppModule m) => modulesFor(roles).contains(m);
 
+  // ───────────── المصفوفة القابلة للتعديل (A04) ─────────────
+
+  /// الإجراءات الافتراضية لدور على وحدة يملكها افتراضياً
+  static Set<PermAction> defaultActions(CompanyRole role, AppModule m) {
+    if (!(_byRole[role]?.contains(m) ?? false)) return const {};
+    if (m == AppModule.profile || m == AppModule.notifications) return {PermAction.view, PermAction.respond};
+    return switch (m.portal) {
+      Portal.admin => {PermAction.view, PermAction.print, PermAction.configure},
+      Portal.operations => {PermAction.view, PermAction.add, PermAction.respond, PermAction.print},
+      Portal.professional => {PermAction.view, PermAction.respond},
+      Portal.partner => role.isPartner
+          ? {PermAction.view, PermAction.add, PermAction.respond, PermAction.print, PermAction.approve}
+          : {PermAction.view},
+    };
+  }
+
+  /// حقوق الشريك الأساسية: لا يستطيع المسؤول نزعها (حماية تعاقدية)
+  static Set<PermAction> lockedActions(CompanyRole role, AppModule m) {
+    // منع إقفال الإدارة على نفسها: مسؤول النظام يحتفظ دائماً بضبط الصلاحيات
+    if (role == CompanyRole.systemAdmin && m == AppModule.roles) return {PermAction.view, PermAction.configure};
+    if (!role.isPartner) return const {};
+    return switch (m) {
+      AppModule.dashboard || AppModule.establishment || AppModule.versions || AppModule.auditLog || AppModule.notifications =>
+        {PermAction.view},
+      AppModule.voting => {PermAction.view, PermAction.respond, PermAction.approve},
+      AppModule.approvals => {PermAction.view, PermAction.approve},
+      AppModule.disputes => {PermAction.view, PermAction.respond},
+      _ => const {},
+    };
+  }
+
+  /// الإجراءات الفعلية بعد تطبيق تخصيص الشركة، مع إبقاء الحقوق المقفلة دائماً
+  static Set<PermAction> actionsFor(CompanyRole role, AppModule m, Company? c) {
+    final o = c?.permissions[role.name]?[m.name];
+    final base = o == null ? defaultActions(role, m) : o.map(PermAction.values.byName).toSet();
+    return {...base, ...lockedActions(role, m)};
+  }
+
+  static Set<PermAction> actions(Iterable<CompanyRole> roles, AppModule m, Company? c) =>
+      {for (final r in roles) ...actionsFor(r, m, c)};
+
+  /// الوحدات الظاهرة: التي يملك عليها الدور إجراء العرض
+  static Set<AppModule> effectiveModules(Iterable<CompanyRole> roles, Company? c) =>
+      {for (final m in AppModule.values) if (actions(roles, m, c).contains(PermAction.view)) m};
+
+  /// صلاحية نقطة إفصاح (A05): تخصيص الشركة أو الافتراضي. البيانات الشخصية لغير الشركاء
+  /// لا تُتاح إلا بعد موافقة كل الشركاء المعنيين.
+  static Set<PermAction> pointActions(Iterable<CompanyRole> roles, String pointId, Company? c) {
+    final p = ControlPoint.byId(pointId);
+    final out = <PermAction>{};
+    for (final r in roles) {
+      final o = c?.controlPoints[pointId]?[r.name];
+      final a = o == null ? (p.defaults[r] ?? const {}) : o.map(PermAction.values.byName).toSet();
+      if (p.requiresConsent && !r.isPartner && a.isNotEmpty && !(c?.consentComplete(pointId, r) ?? false)) continue;
+      out.addAll(a);
+    }
+    return out;
+  }
+
   /// البوابات المتاحة لمجموعة أدوار، بالترتيب الثابت للبوابات
   static List<Portal> portalsFor(Iterable<CompanyRole> roles) {
     final set = roles.map((r) => r.portal).toSet();
@@ -292,6 +388,10 @@ class CompanyMember {
   final Set<CompanyRole> roles;
   final double equity; // نسبة الملكية، وهي وزن التصويت
 
+  /// موظف أو طرف مدعو من الإدارة بلا حصص (ليس جزءاً من جدول الحصص في العقد)
+  final bool staff;
+  final MemberStatus status;
+
   const CompanyMember({
     required this.id,
     required this.name,
@@ -299,9 +399,23 @@ class CompanyMember {
     this.nationalId = '',
     required this.roles,
     this.equity = 0,
+    this.staff = false,
+    this.status = MemberStatus.active,
   });
 
   bool get isPartner => roles.any((r) => r.isPartner);
+  bool get active => status == MemberStatus.active;
+
+  CompanyMember copyWith({Set<CompanyRole>? roles, MemberStatus? status, double? equity}) => CompanyMember(
+        id: id,
+        name: name,
+        phone: phone,
+        nationalId: nationalId,
+        roles: roles ?? this.roles,
+        equity: equity ?? this.equity,
+        staff: staff,
+        status: status ?? this.status,
+      );
 
   SessionPartner toSessionPartner() =>
       SessionPartner(id: id, name: name, nationalId: nationalId, phone: phone, equity: equity);
@@ -313,6 +427,8 @@ class CompanyMember {
         'nationalId': nationalId,
         'roles': roles.map((r) => r.name).toList(),
         'equity': equity,
+        if (staff) 'staff': true,
+        if (status != MemberStatus.active) 'status': status.name,
       };
 
   factory CompanyMember.fromJson(Map<String, dynamic> j) => CompanyMember(
@@ -322,6 +438,8 @@ class CompanyMember {
         nationalId: j['nationalId'] as String? ?? '',
         roles: (j['roles'] as List? ?? []).map((r) => CompanyRole.values.byName(r as String)).toSet(),
         equity: (j['equity'] as num?)?.toDouble() ?? 0,
+        staff: j['staff'] as bool? ?? false,
+        status: MemberStatus.values.byName(j['status'] as String? ?? 'active'),
       );
 }
 
@@ -339,6 +457,25 @@ class Company {
   final DateTime createdAt;
   final String createdBy;
 
+  // ───── الإدارة (المرحلة 4) ─────
+  /// تخصيص مصفوفة الصلاحيات: الدور ← الوحدة ← الإجراءات
+  Map<String, Map<String, List<String>>> permissions;
+
+  /// تخصيص نقاط الإفصاح: النقطة ← الدور ← الإجراءات
+  Map<String, Map<String, List<String>>> controlPoints;
+
+  /// موافقات الشركاء على إتاحة بياناتهم الشخصية: "النقطة|الدور" ← العضو ← الوقت
+  Map<String, Map<String, String>> consents;
+
+  /// إعدادات المنصة غير التعاقدية (A21)
+  Map<String, Object?> settings;
+
+  /// معالجة أحداث الأمان (A20): معرّف الحدث ← المعالجة
+  Map<String, Map<String, dynamic>> triage;
+
+  /// آخر دخول لكل عضو؛ العضو الذي لم يدخل بعد دعوته معلّقة
+  Map<String, String> lastSeen;
+
   Company({
     required this.id,
     required this.legalName,
@@ -351,14 +488,36 @@ class Company {
     this.votingSettings = VotingSettings.defaults,
     required this.createdAt,
     required this.createdBy,
-  });
+    Map<String, Map<String, List<String>>>? permissions,
+    Map<String, Map<String, List<String>>>? controlPoints,
+    Map<String, Map<String, String>>? consents,
+    Map<String, Object?>? settings,
+    Map<String, Map<String, dynamic>>? triage,
+    Map<String, String>? lastSeen,
+  })  : permissions = permissions ?? {},
+        controlPoints = controlPoints ?? {},
+        consents = consents ?? {},
+        settings = settings ?? {},
+        triage = triage ?? {},
+        lastSeen = lastSeen ?? {};
 
-  List<CompanyMember> get partners => members.where((m) => m.isPartner).toList();
+  /// قيمة إعداد المنصة أو قيمته الافتراضية
+  T setting<T>(String key) => (settings[key] ?? PlatformSetting.byKey(key).defaultValue) as T;
+
+  /// هل وافق كل الشركاء على إتاحة نقطة بيانات شخصية لهذا الدور؟
+  bool consentComplete(String pointId, CompanyRole role) {
+    final given = consents['$pointId|${role.name}'] ?? const {};
+    return partners.every((p) => given.containsKey(p.id));
+  }
+
+  List<CompanyMember> get partners => members.where((m) => m.isPartner && !m.staff).toList();
+
+  List<CompanyMember> get staffMembers => members.where((m) => m.staff).toList();
 
   double get equityTotal => partners.fold(0, (a, m) => a + m.equity);
 
   CompanyMember? memberByPhone(String? phone) =>
-      phone == null ? null : members.where((m) => m.phone == phone).firstOrNull;
+      phone == null ? null : members.where((m) => m.phone == phone && m.active).firstOrNull;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -367,8 +526,25 @@ class Company {
         'currency': currency.name,
         'capital': capital,
         'status': status.name,
-        'members': members.map((m) => m.toJson()).toList(),
-        'memberPhones': members.map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
+        // الشركاء وأعضاء التأسيس في "members"، والموظفون المدعوون في "staff" منفصلين
+        'members': members.where((m) => !m.staff).map((m) => m.toJson()).toList(),
+        'staff': members.where((m) => m.staff).map((m) => m.toJson()).toList(),
+        // الموقوف يفقد الوصول للقراءة فوراً
+        'memberPhones': members.where((m) => m.active).map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
+        'partnerPhones': members.where((m) => !m.staff).map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
+        'permissions': permissions,
+        'controlPoints': controlPoints,
+        'consents': consents,
+        // مسؤولو النظام: يضبطون الصلاحيات والإعدادات ويدعون الموظفين (تتحقق منها قواعد الأمان)
+        'adminPhones': members
+            .where((m) => m.active && m.roles.contains(CompanyRole.systemAdmin))
+            .map((m) => m.phone)
+            .where((p) => p.isNotEmpty)
+            .toSet()
+            .toList(),
+        'settings': settings,
+        'triage': triage,
+        'lastSeen': lastSeen,
         'contractVersion': contractVersion,
         'votingSettings': votingSettings.toJson(),
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -382,15 +558,30 @@ class Company {
         currency: AppCurrency.values.byName(j['currency'] as String),
         capital: (j['capital'] as num).toDouble(),
         status: CompanyStatus.values.byName(j['status'] as String? ?? 'establishment'),
-        members: (j['members'] as List)
-            .map((m) => CompanyMember.fromJson(Map<String, dynamic>.from(m as Map)))
-            .toList(),
+        members: [
+          for (final m in [...(j['members'] as List), ...(j['staff'] as List? ?? [])])
+            CompanyMember.fromJson(Map<String, dynamic>.from(m as Map)),
+        ],
         contractVersion: (j['contractVersion'] as num?)?.toInt() ?? 0,
         votingSettings: VotingSettings.fromJson(
             j['votingSettings'] == null ? null : Map<String, dynamic>.from(j['votingSettings'] as Map)),
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
         createdBy: j['createdBy'] as String? ?? '',
+        permissions: _nested(j['permissions']),
+        controlPoints: _nested(j['controlPoints']),
+        consents: Map<String, dynamic>.from(j['consents'] as Map? ?? {})
+            .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map).map((a, b) => MapEntry(a, '$b')))),
+        settings: Map<String, Object?>.from(j['settings'] as Map? ?? {}),
+        triage: Map<String, dynamic>.from(j['triage'] as Map? ?? {})
+            .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map))),
+        lastSeen: Map<String, dynamic>.from(j['lastSeen'] as Map? ?? {}).map((k, v) => MapEntry(k, '$v')),
       );
+
+  static Map<String, Map<String, List<String>>> _nested(Object? raw) =>
+      Map<String, dynamic>.from(raw as Map? ?? {}).map((k, v) => MapEntry(
+          k,
+          Map<String, dynamic>.from(v as Map)
+              .map((a, b) => MapEntry(a, (b as List).map((e) => '$e').toList()))));
 }
 
 /// نوع الفاعل في سجل التدقيق: يجب التمييز بين فعل المستخدم وفعل النظام

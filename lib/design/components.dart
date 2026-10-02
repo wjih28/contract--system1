@@ -20,14 +20,15 @@ class GovCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.navySurface,
+    // Material بدل Container حتى تظهر لمسة الضغط لعناصر القوائم داخل البطاقة
+    return Material(
+      color: AppColors.navySurface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.divider),
+        side: const BorderSide(color: AppColors.divider),
       ),
+      child: Padding(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -45,6 +46,7 @@ class GovCard extends StatelessWidget {
           const SizedBox(height: 12),
           child,
         ],
+      ),
       ),
     );
   }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:provider/provider.dart';
 
+import 'consent_requests_screen.dart';
+
 import '../../design/components.dart';
 import '../../design/responsive.dart';
 import '../../design/state_view.dart';
@@ -54,6 +56,7 @@ class PartnerDashboardScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
           children: [
+            const ConsentBanner(),
             // الترويسة: الشركة والعقد والحالة
             Text(c.legalName,
                 style: const TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w900)),

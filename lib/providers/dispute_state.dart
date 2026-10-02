@@ -91,10 +91,10 @@ class DisputeState extends ChangeNotifier {
       openedAt: t,
       parties: parties ?? c.partners.where((p) => p.equity > 0).map((p) => p.id).toList(),
       stageStartedAt: t,
-      deadline: t.add(const Duration(days: DisputeSettings.negotiationDays)),
+      deadline: t.add(Duration(days: c.setting<int>('dispute.negotiationDays'))),
     );
     d.entries.add(_sys(d, 'فُتحت التذكرة (${trigger.label}) بواسطة $openedByName. بدأت مرحلة التفاوض المباشر لمدة '
-        '${DisputeSettings.negotiationDays} يوماً، وأُقفلت تعديلات العقد وجدول الحصص مؤقتاً.'));
+        '${c.setting<int>('dispute.negotiationDays')} يوماً، وأُقفلت تعديلات العقد وجدول الحصص مؤقتاً.'));
     disputes.add(d);
     _log(c.id, 'فتح تذكرة نزاع: ${trigger.label}', d.id, issue,
         actor: openedBy == 'system' ? ActorType.system : ActorType.user, evidence: 'إصدار العقد ${c.contractVersion}');
@@ -185,7 +185,7 @@ class DisputeState extends ChangeNotifier {
         targetId: targetId,
         price: price,
         at: t,
-        deadline: t.add(const Duration(hours: DisputeSettings.buyOutHours)));
+        deadline: t.add(Duration(hours: c.setting<int>('dispute.buyOutHours'))));
     d.deadline = d.buyOut!.deadline;
     d.status = DisputeStatus.awaitingParty;
     final target = _name(c, targetId);
@@ -194,7 +194,7 @@ class DisputeState extends ChangeNotifier {
         authorId: offerorId,
         authorName: offerorName,
         text: 'عرض ملزم لشراء حصة $target كاملة بمبلغ ${formatCurrency(price, c.currency)}. '
-            'لـ$target خلال ${DisputeSettings.buyOutHours} ساعة أن يبيع بهذا السعر، أو يشتري حصة $offerorName بنفس السعر للنسبة الواحدة.',
+            'لـ$target خلال ${c.setting<int>('dispute.buyOutHours')} ساعة أن يبيع بهذا السعر، أو يشتري حصة $offerorName بنفس السعر للنسبة الواحدة.',
         at: t,
         stage: d.stage));
     _log(c.id, 'عرض شراء ملزم في النزاع', d.id, '$offerorName → $target: ${formatCurrency(price, c.currency)}');
@@ -369,7 +369,7 @@ class DisputeState extends ChangeNotifier {
     d.escalationConsents = {};
     d.settlement = null;
     d.deadline = switch (next) {
-      DisputeStage.mediation => now().add(const Duration(days: DisputeSettings.mediationDays)),
+      DisputeStage.mediation => now().add(Duration(days: c.setting<int>('dispute.mediationDays'))),
       DisputeStage.deadlockBreak => now().add(const Duration(days: DisputeSettings.deadlockBreakDays)),
       // التحكيم والتصفية بلا مهلة آلية: تنتهي بحكم أو بإغلاق التصفية
       _ => now().add(const Duration(days: 3650)),

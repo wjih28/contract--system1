@@ -306,7 +306,7 @@ class OperationsState extends ChangeNotifier {
 
   /// طلب استثناء لمرة واحدة لعملية مجمّدة. لا يعدّل القاعدة ولا العقد.
   ExceptionRequest requestException(Company c, FinancialTx tx, RuleCheck check,
-      {required String reason, required String requestedBy, int days = 3}) {
+      {required String reason, required String requestedBy, int? days}) {
     final blocked = exceptionBlocker(c.id);
     if (blocked != null) throw StateError(blocked);
     final now = DateTime.now();
@@ -321,7 +321,7 @@ class OperationsState extends ChangeNotifier {
       reason: reason.trim(),
       requestedBy: requestedBy,
       createdAt: now,
-      deadline: now.add(Duration(days: days)),
+      deadline: now.add(Duration(days: days ?? c.setting<int>('exception.deadlineDays'))),
     );
     exceptions.add(ex);
     tx.status = TxStatus.exceptionPending;

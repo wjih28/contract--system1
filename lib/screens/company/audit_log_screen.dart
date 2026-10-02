@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../design/responsive.dart';
 import '../../design/state_view.dart';
+import '../../models/admin.dart';
 import '../../models/company.dart';
 import '../../providers/company_state.dart';
 import '../../services/report_pdf.dart';
@@ -24,6 +25,9 @@ const _objectTypes = {
   'company': 'الشركة والحصص',
   'settings': 'الإعدادات',
   'integration': 'التكامل',
+  'users': 'المستخدمون',
+  'permissions': 'الصلاحيات والإفصاح',
+  'security': 'الأمان',
 };
 
 /// P15 + A18: سجل التدقيق. خط زمني للأدلة مع تصفية حسب الفاعل والكائن والإصدار والفترة والبحث،
@@ -70,7 +74,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       appBar: AppBar(
         title: const Text('سجل التدقيق'),
         actions: [
-          if (c != null)
+          if (c != null && cs.canSee('audit.export', PermAction.print))
             IconButton(
               tooltip: 'تصدير تقرير PDF',
               icon: const Icon(Icons.picture_as_pdf_rounded),

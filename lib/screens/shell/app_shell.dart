@@ -21,6 +21,13 @@ import '../contracts_screen.dart';
 import '../company/my_companies_screen.dart';
 import '../company/partner_dashboard_screen.dart';
 import '../establishment/voting_center_screen.dart';
+import '../admin/admin_dashboard_screen.dart';
+import '../admin/companies_screen.dart';
+import '../admin/control_points_screen.dart';
+import '../admin/platform_settings_screen.dart';
+import '../admin/roles_screen.dart';
+import '../admin/security_monitor_screen.dart';
+import '../admin/users_screen.dart';
 import '../admin/version_manager_screen.dart';
 import '../disputes/disputes_screen.dart';
 import '../versions/versions_screen.dart';
@@ -64,6 +71,7 @@ class _AppShellState extends State<AppShell> {
     final companyId = cs.current?.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      context.read<CompanyState>().touchLastSeen();
       context.read<OperationsState>().watchCompany(companyId);
       context.read<DisputeState>().watchCompany(companyId);
     });
@@ -174,6 +182,13 @@ class _AppShellState extends State<AppShell> {
         AppModule.versionManager => const VersionManagerScreen(),
         AppModule.notifications => const NotificationsCenterScreen(),
         AppModule.profile => const ProfileScreen(),
+        AppModule.adminDashboard => const AdminDashboardScreen(),
+        AppModule.companies => const CompaniesScreen(),
+        AppModule.users => const UsersScreen(),
+        AppModule.roles => const RolesScreen(),
+        AppModule.controlPoints => const ControlPointsScreen(),
+        AppModule.securityMonitor => const SecurityMonitorScreen(),
+        AppModule.platformSettings => const PlatformSettingsScreen(),
         AppModule.questionBank => const QuestionBankScreen(),
         AppModule.clauseLibrary => const ClauseLibraryScreen(),
         AppModule.logicRules => const LogicRulesScreen(),
