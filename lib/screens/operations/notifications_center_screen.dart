@@ -66,14 +66,17 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
                 title: 'لا توجد إشعارات',
                 message: 'تصلك هنا تنبيهات الحوكمة: العمليات المجمّدة، طلبات الاستثناء، المخالفات.',
               ),
-            ...list.map((n) => Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
+            ...list.map((n) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  // Material بدل Container لتظهر لمسة الضغط فوق خلفية البطاقة
+                  child: Material(
                     color: AppColors.navySurface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: n.read ? AppColors.divider : AppColors.gold.withValues(alpha: 0.5)),
-                  ),
-                  child: ListTile(
+                    clipBehavior: Clip.antiAlias,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: n.read ? AppColors.divider : AppColors.gold.withValues(alpha: 0.5)),
+                    ),
+                    child: ListTile(
                     onTap: () {
                       ops.markRead(c, n);
                       _open(context, n);
@@ -96,6 +99,7 @@ class _NotificationsCenterScreenState extends State<NotificationsCenterScreen> {
                       icon: const Icon(Icons.local_shipping_outlined, size: 20),
                       onPressed: () => _delivery(context, n),
                     ),
+                  ),
                   ),
                 )),
           ],
