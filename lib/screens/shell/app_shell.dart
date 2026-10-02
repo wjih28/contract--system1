@@ -30,6 +30,16 @@ import '../admin/security_monitor_screen.dart';
 import '../admin/users_screen.dart';
 import '../admin/version_manager_screen.dart';
 import '../disputes/disputes_screen.dart';
+import '../operations/approval_center_screen.dart';
+import '../operations/correspondence_screen.dart';
+import '../operations/current_account_screen.dart';
+import '../operations/decision_execution_screen.dart';
+import '../operations/expense_limits_screen.dart';
+import '../operations/ops_alerts_screen.dart';
+import '../operations/payroll_screen.dart';
+import '../operations/plans_screen.dart';
+import '../reports/reports_screen.dart';
+import '../../providers/daily_ops_state.dart';
 import '../versions/versions_screen.dart';
 import '../profile_screen.dart';
 import '../../providers/dispute_state.dart';
@@ -74,6 +84,7 @@ class _AppShellState extends State<AppShell> {
       context.read<CompanyState>().touchLastSeen();
       context.read<OperationsState>().watchCompany(companyId);
       context.read<DisputeState>().watchCompany(companyId);
+      context.read<DailyOpsState>().watchCompany(companyId);
     });
 
     final modules = cs.myModules;
@@ -178,6 +189,16 @@ class _AppShellState extends State<AppShell> {
         AppModule.approvals => const ApprovalsScreen(),
         AppModule.transactions => const TransactionsScreen(),
         AppModule.disputes => const DisputesScreen(),
+        AppModule.partnerReports => const ReportsScreen(),
+        AppModule.opsExpenses => const ExpenseLimitsMonitorScreen(),
+        AppModule.currentAccount => const CurrentAccountScreen(),
+        AppModule.payroll => const PayrollScreen(),
+        AppModule.approvalCenter => const ApprovalCenterScreen(),
+        AppModule.decisionExecution => const DecisionExecutionScreen(),
+        AppModule.plans => const PlansScreen(),
+        AppModule.correspondence => const CorrespondenceScreen(),
+        AppModule.opsAlerts => const OpsAlertsScreen(),
+        AppModule.opsReports => const ReportsScreen(operational: true),
         AppModule.versions => const VersionsScreen(),
         AppModule.versionManager => const VersionManagerScreen(),
         AppModule.notifications => const NotificationsCenterScreen(),

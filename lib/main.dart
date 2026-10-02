@@ -6,6 +6,7 @@ import 'providers/contract_state.dart';
 import 'models/company.dart';
 import 'models/dispute.dart';
 import 'models/operations.dart';
+import 'providers/daily_ops_state.dart';
 import 'providers/dispute_state.dart';
 import 'providers/operations_state.dart';
 import 'services/backend.dart';
@@ -104,6 +105,12 @@ class MithaqApp extends StatelessWidget {
         // الرقابة المالية: العمليات والتجميد والاستثناءات والمخالفات والإشعارات
         ChangeNotifierProvider(
           create: (ctx) => OperationsState()
+            ..auditSink = ctx.read<CompanyState>().log
+            ..load(),
+        ),
+        // التشغيل اليومي: الحساب الجاري، الرواتب، الخطط، المراسلات، تنفيذ القرارات، التنبيهات
+        ChangeNotifierProvider(
+          create: (ctx) => DailyOpsState()
             ..auditSink = ctx.read<CompanyState>().log
             ..load(),
         ),

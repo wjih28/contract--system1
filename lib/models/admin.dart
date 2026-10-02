@@ -132,6 +132,8 @@ class ControlPoint {
       actions: {PermAction.view, PermAction.add, PermAction.print},
       defaults: {
         ..._all(_partners, {PermAction.view}),
+        // الشريك المدير يدير الرواتب حتى يُعيَّن مدير مالي؛ تغيير راتبه هو يمر بقاعدة العقد
+        CompanyRole.managingPartner: {PermAction.view, PermAction.add, PermAction.print},
         CompanyRole.financialManager: {PermAction.view, PermAction.add, PermAction.print},
       },
     ),

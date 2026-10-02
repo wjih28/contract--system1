@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../providers/company_state.dart';
 import '../providers/contract_state.dart';
+import '../providers/daily_ops_state.dart';
 import '../providers/dispute_state.dart';
 import '../providers/operations_state.dart';
 import 'cloud_sync.dart';
@@ -54,6 +55,7 @@ class Backend {
     await companies.attachCloud(FirebaseFirestore.instance, phone: phone, uid: user.uid);
     if (context.mounted) await context.read<OperationsState>().attachCloud(FirebaseFirestore.instance);
     if (context.mounted) await context.read<DisputeState>().attachCloud(FirebaseFirestore.instance);
+    if (context.mounted) await context.read<DailyOpsState>().attachCloud(FirebaseFirestore.instance);
   }
 
   static Future<void> signOut(BuildContext context) async {
@@ -61,6 +63,7 @@ class Backend {
     await context.read<ContractState>().detachCloud();
     if (context.mounted) await context.read<OperationsState>().detachCloud();
     if (context.mounted) await context.read<DisputeState>().detachCloud();
+    if (context.mounted) await context.read<DailyOpsState>().detachCloud();
     await companies.detachCloud();
     if (ready) await FirebaseAuth.instance.signOut();
   }

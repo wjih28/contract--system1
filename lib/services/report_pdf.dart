@@ -34,7 +34,7 @@ class ReportPdf {
 
   static Future<void> shareCaseFile(Company c, Dispute d, List<AuditEvent> audit, String hash) => Printing.layoutPdf(
         name: 'ملف_قضية_${d.id}.pdf',
-        onLayout: (f) => _build(
+        onLayout: (f) => build(
           f,
           title: 'ملف قضية تحكيم',
           subtitle: '${c.legalName} · التذكرة ${d.id}',
@@ -67,7 +67,7 @@ class ReportPdf {
   static Future<void> shareAudit(Company c, List<AuditEvent> events, {String filter = 'كل الأحداث'}) =>
       Printing.layoutPdf(
         name: 'سجل_التدقيق_${c.legalName}.pdf',
-        onLayout: (f) => _build(
+        onLayout: (f) => build(
           f,
           title: 'تقرير سجل التدقيق',
           subtitle: '${c.legalName} · $filter · ${events.length} حدث',
@@ -83,7 +83,7 @@ class ReportPdf {
         ),
       );
 
-  static Future<Uint8List> _build(PdfPageFormat format,
+  static Future<Uint8List> build(PdfPageFormat format,
       {required String title,
       required String subtitle,
       required String hash,

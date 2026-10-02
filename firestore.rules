@@ -159,6 +159,47 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // ───────────── التشغيل اليومي (المرحلة 4) ─────────────
+      // قيود الحساب الجاري للإضافة فقط: التصحيح بقيد تسوية جديد لا بتعديل القيد
+      match /ledger/{eId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid && request.resource.data.amount is number;
+        allow update, delete: if false;
+      }
+
+      match /payroll/{bId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid) && request.resource.data.companyId == cid && request.resource.data.period == (resource == null ? request.resource.data.period : resource.data.period);
+        allow delete: if false;
+      }
+
+      match /plans/{pId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow delete: if false;
+      }
+
+      // المراسلة: نصها يُعدَّل في المسودة فقط، وبعد الإصدار تتغير حالتها فقط ولا تُحذف
+      match /letters/{lId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.reference == resource.data.reference
+          && (resource.data.status == 'draft'
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if isCompanyMember(cid) && resource.data.status == 'draft';
+      }
+
+      match /executions/{xId} {
+        allow read, create, update: if isCompanyMember(cid);
+        allow delete: if false;
+      }
+
+      match /alertStates/{aId} {
+        allow read, create, update: if isCompanyMember(cid);
+        allow delete: if false;
+      }
+
       // تذكرة النزاع (المرحلة 3): دائمة لا تُحذف، وأطرافها ومحفزها ثابتة، والمغلقة لا تُعدَّل
       match /disputes/{dId} {
         allow read: if isCompanyMember(cid);
