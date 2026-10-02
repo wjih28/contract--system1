@@ -260,7 +260,7 @@ class Permissions {
 }
 
 /// مرحلة الشركة في دورة حياتها
-enum CompanyStatus { establishment, active, suspended, liquidation }
+enum CompanyStatus { establishment, active, suspended, liquidation, archived }
 
 extension CompanyStatusX on CompanyStatus {
   String get label => switch (this) {
@@ -268,6 +268,7 @@ extension CompanyStatusX on CompanyStatus {
         CompanyStatus.active => 'نشطة',
         CompanyStatus.suspended => 'موقوفة',
         CompanyStatus.liquidation => 'قيد التصفية',
+        CompanyStatus.archived => 'مؤرشفة بعد التصفية',
       };
 }
 

@@ -23,6 +23,7 @@ import '../company/partner_dashboard_screen.dart';
 import '../establishment/voting_center_screen.dart';
 import '../dispute_room_screen.dart';
 import '../profile_screen.dart';
+import '../../providers/dispute_state.dart';
 import '../../providers/operations_state.dart';
 import '../admin/channels_screen.dart';
 import '../admin/expense_limits_screen.dart';
@@ -60,7 +61,9 @@ class _AppShellState extends State<AppShell> {
     // متابعة عمليات الشركة الحالية لحظياً (في وضع الخادم)
     final companyId = cs.current?.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<OperationsState>().watchCompany(companyId);
+      if (!mounted) return;
+      context.read<OperationsState>().watchCompany(companyId);
+      context.read<DisputeState>().watchCompany(companyId);
     });
 
     final modules = cs.myModules;

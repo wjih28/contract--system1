@@ -57,6 +57,27 @@ class OperationsState extends ChangeNotifier {
       subject: 'قرار الشركاء في طلب الاستثناء',
       body: 'صدر قرار الشركاء في استثناء العملية بقيمة {amount} لصالح {payee}: {rule}.',
     ),
+    MessageTemplate(
+      id: 'T-DISPUTE',
+      event: 'فتح نزاع',
+      subject: 'إشعار قانوني: فُتحت تذكرة نزاع في {company}',
+      body: 'فُتحت تذكرة نزاع: {rule}. بدأت مرحلة التفاوض المباشر، وتُقفل تعديلات العقد وجدول الحصص مؤقتاً حتى تُحسم.',
+      mandatory: true,
+    ),
+    MessageTemplate(
+      id: 'T-DISPUTE-STAGE',
+      event: 'انتقال مرحلة نزاع',
+      subject: 'إشعار قانوني: تحديث في نزاع {company}',
+      body: 'تحديث في تذكرة النزاع: {rule}. المهلة: {limit}.',
+      mandatory: true,
+    ),
+    MessageTemplate(
+      id: 'T-AMENDMENT',
+      event: 'مقترح تعديل العقد',
+      subject: 'مقترح تعديل عقد {company} بانتظار تصويتك',
+      body: 'قُدّم مقترح تعديل: {rule}. يبقى العقد الحالي سارياً حتى يُعتمد الإصدار الجديد ويوقَّع.',
+      mandatory: true,
+    ),
   ];
 
   // ───────────── التحميل والحفظ ─────────────
@@ -80,7 +101,8 @@ class OperationsState extends ChangeNotifier {
           notifications = _list(j['no'], AppNotification.fromJson);
         }
         final t = _list(j['templates'], MessageTemplate.fromJson);
-        if (t.isNotEmpty) templates = t;
+        // القوالب المحفوظة تحتفظ بتعديلات المسؤول، وتُضاف القوالب الجديدة من الإصدارات اللاحقة
+        if (t.isNotEmpty) templates = [...t, ..._defaultTemplates.where((d) => !t.any((x) => x.id == d.id))];
         mutedByMember = (j['muted'] as Map? ?? {}).map((k, v) => MapEntry(
             k as String, (v as List).map((c) => NotifCategory.values.byName(c as String)).toSet()));
       }
@@ -203,7 +225,7 @@ class OperationsState extends ChangeNotifier {
 
   /// القواعد السارية للشركة من عقدها المعتمد
   List<ActiveRule> activeRules(ContractState cs, String companyId) {
-    final s = cs.establishmentFor(companyId);
+    final s = cs.currentContract(companyId); // الإصدار الساري فقط: تعديل معتمد يسري على العمليات القادمة
     if (s == null) return const [];
     return RuleEngine.activeRules(
       s,
@@ -223,7 +245,7 @@ class OperationsState extends ChangeNotifier {
 
   /// تسجيل عملية وتمريرها ببوابة الفحص. الإرسال لا يعني الموافقة؛ النتيجة تظهر بعد التقييم.
   FinancialTx submit(ContractState cs, Company c, FinancialTx tx, {required String actorName}) {
-    final session = cs.establishmentFor(c.id);
+    final session = cs.currentContract(c.id);
     tx.checks = preview(cs, c, tx);
     tx.status = RuleEngine.outcome(tx.checks);
     tx.evaluatedAt = DateTime.now();
@@ -272,9 +294,21 @@ class OperationsState extends ChangeNotifier {
 
   // ───────────── الاستثناءات (P16 / O06) ─────────────
 
+  /// أثناء التحكيم تُمنع القرارات الاستثنائية (مسار النزاع، المرحلة 4). يضبطها مزوّد النزاعات.
+  bool Function(String companyId)? exceptionsLocked;
+
+  String? exceptionBlocker(String companyId) => (exceptionsLocked?.call(companyId) ?? false)
+      ? 'الاستثناءات موقوفة مؤقتاً لأن نزاعاً في مرحلة التحكيم، حتى صدور الحكم'
+      : null;
+
+  /// يُستدعى عند تصعيد مخالفة: تُفتح بها تذكرة نزاع
+  void Function(Company c, Violation v)? onViolationEscalated;
+
   /// طلب استثناء لمرة واحدة لعملية مجمّدة. لا يعدّل القاعدة ولا العقد.
   ExceptionRequest requestException(Company c, FinancialTx tx, RuleCheck check,
       {required String reason, required String requestedBy, int days = 3}) {
+    final blocked = exceptionBlocker(c.id);
+    if (blocked != null) throw StateError(blocked);
     final now = DateTime.now();
     final ex = ExceptionRequest(
       id: 'X${now.millisecondsSinceEpoch}',
@@ -403,6 +437,7 @@ class OperationsState extends ChangeNotifier {
     _put(c.id, 'violations', v.id, v.toJson());
     _log(c.id, 'تحديث المخالفة ${v.id}', 'violation', v.id,
         before == v.status ? 'إضافة معلومات' : '${before.label} ← ${v.status.label}');
+    if (before != ViolationStatus.escalated && v.status == ViolationStatus.escalated) onViolationEscalated?.call(c, v);
     _changed();
   }
 
@@ -443,6 +478,14 @@ class OperationsState extends ChangeNotifier {
       notifications.add(n);
       _put(c.id, 'notifications', n.id, n.toJson());
     }
+  }
+
+  /// إشعار عام لأحداث الحوكمة من خارج الرقابة المالية (النزاعات، التعديلات)
+  void notifyCompany(Company c, NotifCategory cat, String templateId,
+      {required String subject, String deadline = '—', required String relatedType, required String relatedId}) {
+    _notifyPartners(c, cat, templateId, {'company': c.legalName, 'rule': subject, 'limit': deadline, 'amount': '', 'payee': ''},
+        relatedType, relatedId);
+    _changed();
   }
 
   void markRead(Company c, AppNotification n) {

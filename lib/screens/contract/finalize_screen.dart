@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../../design/responsive.dart';
 import '../../design/state_view.dart';
 import '../../models/questionnaire.dart';
-import '../../providers/company_state.dart';
 import '../../providers/contract_state.dart';
 import '../../services/identity_service.dart';
 import '../../services/phone.dart';
@@ -33,14 +32,15 @@ class FinalizeScreen extends StatelessWidget {
     final notReady = st.signingBlockers(s);
     final blockers = st.finalizeBlockers(s, minWitnesses: kMinWitnesses);
     final fmt = DateFormat('yyyy/MM/dd HH:mm');
-    final validSigned = s.partners.where((p) {
+    final signers = st.signersOf(s);
+    final validSigned = signers.where((p) {
       final so = s.signOffs[p.id];
       return so != null && st.signOffValid(s, so);
     }).length;
     final validWitnesses = s.witnesses.where((w) => st.witnessValid(s, w)).length;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('التوقيع والشهود')),
+      appBar: AppBar(title: Text(s.isAmendment ? 'توقيع الإصدار ${s.version}' : 'التوقيع والشهود')),
       body: ContentWidth(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
@@ -86,9 +86,9 @@ class FinalizeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             _Step(n: 1, title: 'إقرار الأهلية وتوقيع الشركاء',
-                subtitle: '$validSigned من ${s.partners.length} وقّعوا على هذا الإصدار', done: validSigned == s.partners.length),
+                subtitle: '$validSigned من ${signers.length} وقّعوا على هذا الإصدار', done: validSigned == signers.length),
             const SizedBox(height: 10),
-            ...s.partners.map((p) {
+            ...signers.map((p) {
               final so = s.signOffs[p.id];
               final valid = so != null && st.signOffValid(s, so);
               final invalidated = so != null && !valid;
@@ -204,7 +204,6 @@ class FinalizeScreen extends StatelessWidget {
     if (ok != true || !context.mounted) return;
     final st = context.read<ContractState>();
     st.complete(s);
-    if (s.companyId != null) context.read<CompanyState>().setContractVersion(s.companyId!, 1);
     Navigator.push(context, MaterialPageRoute(builder: (_) => FinalContractScreen(sessionId: s.id)));
   }
 

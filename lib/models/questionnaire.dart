@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 
 /// العملات المدعومة في السوق المستهدف (اليمن)
@@ -368,6 +369,10 @@ class ClauseRecord {
   /// الشركاء الذين وافقوا على تحييد البند في الجولة الحالية (وضع الخادم)
   Set<String> neutralConsents = {};
 
+  /// في جلسة التعديل: البند موضوع التعديل، وقيمته في الإصدار السابق
+  bool amended;
+  double? previousValue;
+
   ClauseRecord({
     required this.key,
     required this.questionId,
@@ -385,8 +390,13 @@ class ClauseRecord {
     this.clauseVersion,
     this.rule,
     this.showIf,
+    this.amended = false,
+    this.previousValue,
   })  : votes = votes ?? {},
         notes = notes ?? [];
+
+  /// نسخة مستقلة من البند (لإنشاء إصدار جديد دون المساس بالإصدار السابق)
+  ClauseRecord clone() => ClauseRecord.fromJson(jsonDecode(jsonEncode(toJson())) as Map<String, dynamic>);
 
   Map<String, dynamic> toJson() => {
         'key': key,
@@ -405,6 +415,8 @@ class ClauseRecord {
         'clauseVersion': clauseVersion,
         'rule': rule,
         'showIf': showIf,
+        if (amended) 'amended': true,
+        if (previousValue != null) 'previousValue': previousValue,
       };
 
   factory ClauseRecord.fromJson(Map<String, dynamic> j) => ClauseRecord(
@@ -430,6 +442,8 @@ class ClauseRecord {
         clauseVersion: (j['clauseVersion'] as num?)?.toInt(),
         rule: j['rule'] == null ? null : Map<String, dynamic>.from(j['rule'] as Map),
         showIf: j['showIf'] == null ? null : Map<String, dynamic>.from(j['showIf'] as Map),
+        amended: j['amended'] as bool? ?? false,
+        previousValue: (j['previousValue'] as num?)?.toDouble(),
       );
 }
 
@@ -604,7 +618,18 @@ class PartnerSignOff {
 }
 
 /// حالة الجلسة
-enum SessionStatus { active, suspended, awaitingSignature, completed }
+enum SessionStatus { active, suspended, awaitingSignature, completed, withdrawn }
+
+/// نوع الإصدار: التأسيس، أو تعديل قيم بنود، أو تغيير جدول الحصص (من صلح أو حكم أو تخارج)
+enum ChangeType { establishment, amendment, capTable }
+
+extension ChangeTypeX on ChangeType {
+  String get label => switch (this) {
+        ChangeType.establishment => 'عقد التأسيس',
+        ChangeType.amendment => 'تعديل بنود',
+        ChangeType.capTable => 'تعديل جدول الحصص',
+      };
+}
 
 extension SessionStatusX on SessionStatus {
   String get label => switch (this) {
@@ -612,6 +637,7 @@ extension SessionStatusX on SessionStatus {
         SessionStatus.suspended => 'معلّقة',
         SessionStatus.awaitingSignature => 'بانتظار التوقيع',
         SessionStatus.completed => 'مكتملة',
+        SessionStatus.withdrawn => 'لم يُعتمد',
       };
 
   Color get color => switch (this) {
@@ -619,6 +645,7 @@ extension SessionStatusX on SessionStatus {
         SessionStatus.suspended => const Color(0xFFF39C12),
         SessionStatus.awaitingSignature => const Color(0xFFC9A227),
         SessionStatus.completed => const Color(0xFF2ECC71),
+        SessionStatus.withdrawn => const Color(0xFF7C8CA3),
       };
 }
 
@@ -644,6 +671,26 @@ class ContractSession {
   /// بصمة SHA-256 لمحتوى العقد المعتمد؛ أي تعديل لاحق يغيّرها
   String? contentHash;
 
+  // ───── الإصدارات (المرحلة 3) ─────
+  /// رقم إصدار العقد: 1 للتأسيس، ثم يزيد مع كل تعديل معتمد
+  int version;
+  ChangeType changeType;
+
+  /// الإصدار السابق الذي يعدّله هذا الإصدار
+  String? amends;
+  String? changeSummary;
+  String? proposedBy;
+
+  /// النزاع الذي نتج عنه التعديل (صلح أو حكم)
+  String? disputeRef;
+
+  /// الإصدار الذي حلّ محل هذا الإصدار؛ عندها يصبح مؤرشفاً للقراءة فقط
+  String? supersededBy;
+  DateTime? archivedAt;
+
+  bool get archived => supersededBy != null;
+  bool get isAmendment => version > 1;
+
   ContractSession({
     required this.id,
     this.companyId,
@@ -662,6 +709,14 @@ class ContractSession {
     Map<String, PartnerSignOff>? signOffs,
     this.completedAt,
     this.contentHash,
+    this.version = 1,
+    this.changeType = ChangeType.establishment,
+    this.amends,
+    this.changeSummary,
+    this.proposedBy,
+    this.disputeRef,
+    this.supersededBy,
+    this.archivedAt,
   })  : witnesses = witnesses ?? [],
         signOffs = signOffs ?? {};
 
@@ -697,6 +752,14 @@ class ContractSession {
         'signOffs': signOffs.map((k, v) => MapEntry(k, v.toJson())),
         'completedAt': completedAt?.toIso8601String(),
         'contentHash': contentHash,
+        'version': version,
+        'changeType': changeType.name,
+        'amends': amends,
+        'changeSummary': changeSummary,
+        'proposedBy': proposedBy,
+        'disputeRef': disputeRef,
+        'supersededBy': supersededBy,
+        'archivedAt': archivedAt?.toUtc().toIso8601String(),
       };
 
   factory ContractSession.fromJson(Map<String, dynamic> j) => ContractSession(
@@ -728,6 +791,14 @@ class ContractSession {
             ? null
             : DateTime.parse(j['completedAt'] as String),
         contentHash: j['contentHash'] as String?,
+        version: (j['version'] as num?)?.toInt() ?? 1,
+        changeType: ChangeType.values.byName(j['changeType'] as String? ?? 'establishment'),
+        amends: j['amends'] as String?,
+        changeSummary: j['changeSummary'] as String?,
+        proposedBy: j['proposedBy'] as String?,
+        disputeRef: j['disputeRef'] as String?,
+        supersededBy: j['supersededBy'] as String?,
+        archivedAt: j['archivedAt'] == null ? null : DateTime.tryParse(j['archivedAt'] as String),
       );
 }
 
@@ -760,4 +831,15 @@ class QuorumResult {
 
   /// هل يمكن حسم البند الآن: صوّت الجميع، أو انتهت المهلة
   bool get decidable => complete || deadlinePassed;
+}
+
+/// فرق بين إصدارين من العقد (P14): القيمة أو الحالة قبل وبعد، والنص عند تغيّره
+class VersionDiff {
+  final String title;
+  final String before;
+  final String after;
+  final String? textBefore;
+  final String? textAfter;
+
+  const VersionDiff({required this.title, required this.before, required this.after, this.textBefore, this.textAfter});
 }

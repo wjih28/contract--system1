@@ -68,9 +68,10 @@ class ContractState extends ChangeNotifier {
   /// آخر تعديل قام به هذا الجهاز، حتى لا يُعرض كتعارض
   String? lastLocalEdit;
 
-  /// جلسة التأسيس للشركة (واحدة لكل شركة)
-  ContractSession? establishmentFor(String? companyId) =>
-      companyId == null ? null : sessions.where((s) => s.companyId == companyId).firstOrNull;
+  /// جلسة التأسيس للشركة (الإصدار 1، واحدة لكل شركة)
+  ContractSession? establishmentFor(String? companyId) => companyId == null
+      ? null
+      : sessions.where((s) => s.companyId == companyId && s.version == 1).firstOrNull;
 
   /// البنود المفتوحة التي تنتظر صوت هذا الشريك (لم يصوّت بعد)
   List<ClauseRecord> pendingFor(ContractSession s, String partnerId) => s.records
@@ -430,7 +431,7 @@ class ContractState extends ChangeNotifier {
       'partners': s.partners.map((p) => {...p.toJson(), 'phone': phones[p.id]}).toList(),
       'partnerPhones': phones,
       'memberPhones': phones.values.toSet().toList(),
-      'records': {for (final r in s.records) r.key: _recordToRemote(r)},
+      'records': {for (final r in s.records) r.key: _recordToRemote(r, carried: s.isAmendment && !r.amended)},
       // البنود المضافة يدوياً تُرفق بالجلسة حتى تظهر على أجهزة بقية الشركاء
       'customQuestions': _customQuestions.where((q) => used.contains(q.id)).map((q) => q.toJson()).toList(),
       'status': s.status.name,
@@ -444,10 +445,23 @@ class ContractState extends ChangeNotifier {
       'completedAt': null,
       'contentHash': null,
       'createdBy': uid,
+      'version': s.version,
+      'changeType': s.changeType.name,
+      'amends': s.amends,
+      'changeSummary': s.changeSummary,
+      'proposedBy': s.proposedBy,
+      'disputeRef': s.disputeRef,
+      'supersededBy': null,
+      'archivedAt': null,
     };
   }
 
-  Map<String, dynamic> _recordToRemote(ClauseRecord r) => {
+  Map<String, dynamic> _recordToRemote(ClauseRecord r, {bool carried = false}) => {
+        // بند منقول كما هو من الإصدار السابق: يحتفظ بحالته وأصواته دون تصويت جديد
+        if (carried) 'carriedStatus': r.status.name,
+        if (carried) 'carriedVotes': r.votes.map((k, v) => MapEntry(k, v.toJson())),
+        'amended': r.amended,
+        'previousValue': r.previousValue,
         'questionId': r.questionId,
         'concernedPartnerId': r.concernedPartnerId,
         'value': r.value,
@@ -460,7 +474,7 @@ class ContractState extends ChangeNotifier {
         'clauseVersion': r.clauseVersion,
         'rule': r.rule,
         'showIf': r.showIf,
-        'flag': switch (r.status) {
+        'flag': carried ? 'carried' : switch (r.status) {
           ClauseStatus.deferred => 'deferred',
           ClauseStatus.neutralized => 'neutralized',
           _ => 'none',
@@ -505,6 +519,14 @@ class ContractState extends ChangeNotifier {
           .toList(),
       completedAt: d['completedAt'] == null ? null : remoteTime(d['completedAt']),
       contentHash: d['contentHash'] as String?,
+      version: (d['version'] as num?)?.toInt() ?? 1,
+      changeType: ChangeType.values.byName(d['changeType'] as String? ?? 'establishment'),
+      amends: d['amends'] as String?,
+      changeSummary: d['changeSummary'] as String?,
+      proposedBy: d['proposedBy'] as String?,
+      disputeRef: d['disputeRef'] as String?,
+      supersededBy: d['supersededBy'] as String?,
+      archivedAt: d['archivedAt'] == null ? null : remoteTime(d['archivedAt']),
     );
 
     // ترتيب البنود كما في بنك الأسئلة، ثم البنود الخاصة بترتيب الشركاء
@@ -540,7 +562,16 @@ class ContractState extends ChangeNotifier {
         clauseVersion: (m['clauseVersion'] as num?)?.toInt(),
         rule: m['rule'] == null ? null : Map<String, dynamic>.from(m['rule'] as Map),
         showIf: m['showIf'] == null ? null : Map<String, dynamic>.from(m['showIf'] as Map),
+        amended: m['amended'] as bool? ?? false,
+        previousValue: (m['previousValue'] as num?)?.toDouble(),
       );
+      if (m['flag'] == 'carried') {
+        r.status = ClauseStatus.values.byName(m['carriedStatus'] as String);
+        r.votes = Map<String, dynamic>.from(m['carriedVotes'] as Map? ?? {}).map(
+            (k, v) => MapEntry(k, PartnerVote.fromJson(Map<String, dynamic>.from(v as Map))));
+        s.records.add(r);
+        continue;
+      }
       for (final v in votes) {
         if ((v['round'] as num?)?.toInt() != r.round) continue;
         final pid = v['partnerId'] as String;
@@ -604,7 +635,7 @@ class ContractState extends ChangeNotifier {
 
   void _remoteRecord(ContractSession s, ClauseRecord r) {
     lastLocalEdit = editSig(r);
-    _remote(s, {FieldPath(['records', r.key]): _recordToRemote(r)});
+    _remote(s, {FieldPath(['records', r.key]): _recordToRemote(r, carried: s.isAmendment && !r.amended)});
   }
 
   // ───────────── التخزين المحلي ─────────────
@@ -806,7 +837,12 @@ class ContractState extends ChangeNotifier {
     r.resolvedAt = st == ClauseStatus.pending
         ? null
         : (r.votes.isEmpty ? now() : r.votes.values.map((v) => v.at).reduce((a, b) => a.isAfter(b) ? a : b));
+    // J04: تكرار الفشل حتى الجمود يفتح تذكرة نزاع دائمة (المكرر يُهمَل عند الفتح)
+    if (st == ClauseStatus.deadlock) onDeadlock?.call(s, r);
   }
+
+  /// يُستدعى عند وصول بند إلى الجمود؛ يضبطه مزوّد النزاعات
+  void Function(ContractSession s, ClauseRecord r)? onDeadlock;
 
   /// إعادة احتساب البنود المشروطة بعد تغيّر نتيجة أي بند
   void _refreshConditional(ContractSession s) {
@@ -986,6 +1022,7 @@ class ContractState extends ChangeNotifier {
   String draftHash(ContractSession s) => sha256
       .convert(utf8.encode(jsonEncode({
         'id': s.id,
+        if (s.isAmendment) 'version': [s.version, s.amends, s.changeType.name, s.disputeRef],
         'company': [s.companyName, s.companyType, s.currency.code, s.capital],
         'partners': s.partners.map((p) => [p.id, p.name, p.equity]).toList(),
         'clauses': s.records
@@ -1011,7 +1048,7 @@ class ContractState extends ChangeNotifier {
   /// ما يمنع الاعتماد النهائي بعد حسم البنود: التواقيع والشهود
   List<String> finalizeBlockers(ContractSession s, {int minWitnesses = 2}) {
     final out = signingBlockers(s);
-    final unsigned = s.partners.where((p) {
+    final unsigned = signersOf(s).where((p) {
       final so = s.signOffs[p.id];
       return so == null || !signOffValid(s, so);
     }).length;
@@ -1020,6 +1057,11 @@ class ContractState extends ChangeNotifier {
     if (w < minWitnesses) out.add('الشهود: $w من $minWitnesses شهدوا على الإصدار الحالي');
     return out;
   }
+
+  /// الموقّعون المطلوبون: كل الشركاء، وفي تعديل جدول الحصص أصحاب الحصص بعد التعديل
+  List<SessionPartner> signersOf(ContractSession s) => s.changeType == ChangeType.capTable
+      ? s.partners.where((p) => p.equity > 0).toList()
+      : s.partners;
 
   void signOff(ContractSession s, PartnerSignOff so) {
     final hash = draftHash(s);
@@ -1094,9 +1136,206 @@ class ContractState extends ChangeNotifier {
       'completedAt': s.completedAt!.toIso8601String(),
       'contentHash': s.contentHash,
     });
-    _audit(s, 'اعتماد العقد النهائي', objectType: 'contract', objectId: s.id, result: 'العقد مقفل للقراءة فقط',
+    _audit(s, s.isAmendment ? 'اعتماد الإصدار ${s.version} من العقد' : 'اعتماد العقد النهائي',
+        objectType: 'contract', objectId: s.id, result: 'العقد مقفل للقراءة فقط',
         evidence: 'SHA-256: ${s.contentHash}');
+    // الإصدار الجديد يحل محل السابق: يُقفل السابق ويُؤرشف للقراءة فقط
+    final base = s.amends == null ? null : sessions.where((x) => x.id == s.amends).firstOrNull;
+    if (base != null) {
+      base.supersededBy = s.id;
+      base.archivedAt = DateTime.now().toUtc();
+      _remote(base, {'supersededBy': s.id, 'archivedAt': base.archivedAt!.toIso8601String()});
+      _audit(base, 'أرشفة الإصدار ${base.version} بعد اعتماد الإصدار ${s.version}',
+          objectType: 'contract', objectId: base.id, result: 'مؤرشف للقراءة فقط', actorSystem: true);
+    }
+    onVersionCompleted?.call(s);
     _touch(s);
+  }
+
+  // ───────────── الإصدارات والتعديل (المرحلة 3) ─────────────
+
+  /// يُستدعى بعد اعتماد أي إصدار: تحديث رقم إصدار الشركة وجدول الحصص
+  void Function(ContractSession s)? onVersionCompleted;
+
+  /// هل تعديلات العقد مقفلة الآن (نزاع قائم)؟ يضبطها مزوّد النزاعات
+  bool Function(String companyId)? amendmentLocked;
+
+  /// إصدارات عقد الشركة بالترتيب من الأقدم
+  List<ContractSession> versionsFor(String? companyId) =>
+      sessionsFor(companyId)..sort((a, b) => a.version.compareTo(b.version));
+
+  /// الإصدار الساري: آخر إصدار معتمد غير مؤرشف. منه تُستخرج قواعد الرقابة.
+  ContractSession? currentContract(String? companyId) {
+    ContractSession? best;
+    for (final s in sessionsFor(companyId)) {
+      if (s.status != SessionStatus.completed || s.archived) continue;
+      if (best == null || s.version > best.version) best = s;
+    }
+    return best;
+  }
+
+  /// مقترح تعديل قائم لم يُعتمد ولم يُنهَ
+  ContractSession? activeAmendment(String? companyId) => sessionsFor(companyId)
+      .where((s) => s.isAmendment && s.status != SessionStatus.completed && s.status != SessionStatus.withdrawn)
+      .firstOrNull;
+
+  /// ما يمنع تقديم مقترح تعديل الآن
+  String? amendmentBlocker(String companyId, {String? disputeRef}) {
+    if (currentContract(companyId) == null) return 'لا يوجد عقد معتمد بعد';
+    if (activeAmendment(companyId) != null) return 'يوجد مقترح تعديل قائم: أكملوه أو أنهوه أولاً';
+    if (disputeRef == null && (amendmentLocked?.call(companyId) ?? false)) {
+      return 'تعديلات العقد وجدول الحصص مقفلة مؤقتاً بسبب نزاع قائم';
+    }
+    return null;
+  }
+
+  /// البنود التي يمكن تعديل قيمتها: المتفق عليها ولها قيمة
+  List<ClauseRecord> amendableRecords(ContractSession base) => base.records
+      .where((r) =>
+          r.status == ClauseStatus.agreed && r.value != null && question(r.questionId).paramKind != ParamKind.none)
+      .toList();
+
+  /// J03: مقترح تعديل قيم بنود معتمدة. يُنشئ مسودة إصدار جديد؛ البنود المعدّلة فقط تُطرح للتصويت
+  /// والباقي يُنقل كما هو. الإصدار الساري يبقى نافذاً حتى يُعتمد الجديد.
+  ContractSession proposeAmendment(ContractSession base,
+      {required Map<String, double> changes, required String reason, required String proposedBy, String? disputeRef}) {
+    final records = base.records.map((r) {
+      final c = r.clone();
+      final v = changes[r.key];
+      if (v != null && v != r.value) {
+        c
+          ..amended = true
+          ..previousValue = r.value
+          ..value = v
+          ..status = ClauseStatus.pending
+          ..votes = {}
+          ..round = 1
+          ..openedAt = null
+          ..failures = 0
+          ..resolvedAt = null
+          ..notes = [];
+      } else {
+        c
+          ..amended = false
+          ..previousValue = null;
+      }
+      return c;
+    }).toList();
+    final changed = records.where((r) => r.amended).map((r) => question(r.questionId).title).join('، ');
+    return _newVersion(base,
+        records: records,
+        partners: base.partners,
+        type: ChangeType.amendment,
+        summary: 'تعديل: $changed. السبب: ${reason.trim()}',
+        proposedBy: proposedBy,
+        disputeRef: disputeRef);
+  }
+
+  /// تعديل جدول الحصص نتيجة صلح أو حكم أو تخارج. البنود تُنقل كما هي، ويوقّع أصحاب الحصص الجديدة.
+  ContractSession proposeCapTable(ContractSession base,
+      {required Map<String, double> equity, required String reason, required String proposedBy, String? disputeRef}) {
+    final partners = base.partners
+        .map((p) => SessionPartner(
+            id: p.id, name: p.name, nationalId: p.nationalId, phone: p.phone, equity: equity[p.id] ?? p.equity))
+        .toList();
+    final records = base.records
+        .map((r) => r.clone()
+          ..amended = false
+          ..previousValue = null)
+        .toList();
+    final diff = base.partners
+        .where((p) => (equity[p.id] ?? p.equity) != p.equity)
+        .map((p) =>
+            '${p.name} من ${p.equity.toStringAsFixed(2)}% إلى ${(equity[p.id] ?? p.equity).toStringAsFixed(2)}%')
+        .join('، ');
+    return _newVersion(base,
+        records: records,
+        partners: partners,
+        type: ChangeType.capTable,
+        summary: 'جدول الحصص: $diff. السبب: ${reason.trim()}',
+        proposedBy: proposedBy,
+        disputeRef: disputeRef);
+  }
+
+  ContractSession _newVersion(ContractSession base,
+      {required List<ClauseRecord> records,
+      required List<SessionPartner> partners,
+      required ChangeType type,
+      required String summary,
+      required String proposedBy,
+      String? disputeRef}) {
+    final now = DateTime.now();
+    final s = ContractSession(
+      id: 'S${now.microsecondsSinceEpoch}',
+      companyId: base.companyId,
+      companyName: base.companyName,
+      companyType: base.companyType,
+      currency: base.currency,
+      capital: base.capital,
+      partners: partners,
+      records: records,
+      createdAt: now,
+      updatedAt: now,
+      settings: base.settings,
+      version: base.version + 1,
+      changeType: type,
+      amends: base.id,
+      changeSummary: summary,
+      proposedBy: proposedBy,
+      disputeRef: disputeRef,
+    );
+    sessions.insert(0, s);
+    if (isCloud) {
+      _cloud!
+          .create(s.id, sessionToRemote(s, uid: _myUid!))
+          .catchError((Object e) => debugPrint('تعذر إنشاء مقترح التعديل في الخادم: $e'));
+    }
+    _audit(s, 'مقترح ${type.label} (الإصدار ${s.version})', objectType: 'contract', objectId: s.id,
+        result: summary, evidence: 'يعدّل الإصدار ${base.version}${disputeRef == null ? '' : '، نزاع $disputeRef'}');
+    _touch(s);
+    return s;
+  }
+
+  /// إنهاء مقترح تعديل لم يُعتمد. يبقى محفوظاً في سجل الإصدارات ولا يُحذف.
+  void withdrawAmendment(ContractSession s, {required String reason}) {
+    if (!s.isAmendment || s.status == SessionStatus.completed) return;
+    s.status = SessionStatus.withdrawn;
+    _remote(s, {'status': s.status.name});
+    _audit(s, 'إنهاء مقترح التعديل (الإصدار ${s.version}) دون اعتماد', objectType: 'contract', objectId: s.id,
+        result: reason.trim().isEmpty ? 'لم يُعتمد' : reason.trim());
+    _touch(s);
+  }
+
+  /// مقارنة إصدارين: البنود التي اختلفت قيمتها أو نصها أو حالتها، والحصص
+  List<VersionDiff> compare(ContractSession a, ContractSession b) {
+    final out = <VersionDiff>[];
+    for (final id in {...a.partners.map((x) => x.id), ...b.partners.map((x) => x.id)}) {
+      final pa = a.partners.where((x) => x.id == id).firstOrNull;
+      final pb = b.partners.where((x) => x.id == id).firstOrNull;
+      if (pa?.equity != pb?.equity) {
+        out.add(VersionDiff(
+          title: 'حصة ${(pb ?? pa)!.name}',
+          before: pa == null ? '—' : '${pa.equity.toStringAsFixed(2)}%',
+          after: pb == null ? '—' : '${pb.equity.toStringAsFixed(2)}%',
+        ));
+      }
+    }
+    for (final rb in b.records) {
+      final ra = a.records.where((x) => x.key == rb.key).firstOrNull;
+      final q = question(rb.questionId);
+      String show(ContractSession s, ClauseRecord? r) => r == null
+          ? 'غير موجود'
+          : r.status == ClauseStatus.agreed
+              ? formatValue(s, q, r.value)
+              : r.status.label;
+      final before = show(a, ra), after = show(b, rb);
+      final textA = ra == null || ra.status != ClauseStatus.agreed ? null : renderClause(a, ra);
+      final textB = rb.status != ClauseStatus.agreed ? null : renderClause(b, rb);
+      if (before != after || textA != textB) {
+        out.add(VersionDiff(title: q.title, before: before, after: after, textBefore: textA, textAfter: textB));
+      }
+    }
+    return out;
   }
 
   /// المحتوى القانوني للعقد بترتيب ثابت: البنود بنصها النهائي، الأصوات، التواقيع، الشهود.
@@ -1108,6 +1347,8 @@ class ContractState extends ChangeNotifier {
     final sortedSign = s.signOffs.keys.toList()..sort();
     return jsonEncode({
       'id': s.id,
+      // يدخل رقم الإصدار ومرجعه في البصمة للإصدارات المعدّلة فقط، حتى تبقى بصمات عقود التأسيس القائمة صحيحة
+      if (s.isAmendment) 'version': [s.version, s.amends, s.changeType.name, s.disputeRef, s.changeSummary],
       'company': [s.companyName, s.companyType, s.currency.code, s.capital],
       'partners': s.partners
           .map((p) => [p.id, p.name, p.nationalId, normalizePhone(p.phone), p.equity])

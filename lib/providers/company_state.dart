@@ -247,6 +247,57 @@ class CompanyState extends ChangeNotifier {
     _persist();
   }
 
+  /// بعد اعتماد إصدار جديد: رقم الإصدار، وجدول الحصص إن تغيّر (لا يتغير إلا عبر إصدار معتمد)
+  void applyVersion(String companyId, int version, {Map<String, double>? equity}) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null) return;
+    c.contractVersion = version;
+    if (c.status == CompanyStatus.establishment) c.status = CompanyStatus.active;
+    final changed = equity != null && c.members.any((m) => equity.containsKey(m.id) && equity[m.id] != m.equity);
+    if (changed) {
+      c.members = [
+        for (final m in c.members)
+          CompanyMember(
+            id: m.id,
+            name: m.name,
+            phone: m.phone,
+            nationalId: m.nationalId,
+            roles: m.roles,
+            equity: equity[m.id] ?? m.equity,
+          ),
+      ];
+    }
+    _db?.collection('companies').doc(companyId).update({
+      'contractVersion': version,
+      'status': c.status.name,
+      if (changed) 'members': c.members.map((m) => m.toJson()).toList(),
+    }).then((_) {}, onError: (Object e) => debugPrint('تعذر تحديث إصدار العقد: $e'));
+    if (changed) {
+      log(companyId,
+          action: 'تحديث جدول الحصص من الإصدار $version',
+          objectType: 'company',
+          objectId: companyId,
+          result: c.partners.map((m) => '${m.name} ${m.equity.toStringAsFixed(2)}%').join('، '),
+          actorType: ActorType.system);
+    }
+    notifyListeners();
+    _persist();
+  }
+
+  /// التصفية (المرحلة 5 من مسار النزاع): تتحول الشركة إلى قيد التصفية ثم تُؤرشف
+  void setStatus(String companyId, CompanyStatus status) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null || c.status == status) return;
+    c.status = status;
+    _db?.collection('companies').doc(companyId).update({'status': status.name}).then(
+          (_) {},
+          onError: (Object e) => debugPrint('تعذر تحديث حالة الشركة: $e'),
+        );
+    log(companyId, action: 'تغيير حالة الشركة', objectType: 'company', objectId: companyId, result: status.label);
+    notifyListeners();
+    _persist();
+  }
+
   bool _isCreator(CompanyMember m, int index) =>
       isCloud ? (m.phone.isNotEmpty && normalizePhone(m.phone) == myPhone) : index == 0;
 
