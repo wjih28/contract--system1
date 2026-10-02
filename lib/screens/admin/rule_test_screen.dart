@@ -67,6 +67,7 @@ class _RuleTestScreenState extends State<RuleTestScreen> {
             const SizedBox(height: 14),
             DropdownButtonFormField<TxCategory>(
               initialValue: _cat,
+              isExpanded: true,
               dropdownColor: AppColors.navySurface,
               decoration: const InputDecoration(labelText: 'فئة العملية'),
               items: TxCategory.values.map((x) => DropdownMenuItem(value: x, child: Text(x.label))).toList(),

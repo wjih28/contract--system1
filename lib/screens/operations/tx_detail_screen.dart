@@ -124,7 +124,9 @@ class _TxDetailScreenState extends State<TxDetailScreen> {
               ),
               const SizedBox(height: 12),
             ],
-            if (operate && tx.status == TxStatus.frozen)
+            if (operate && tx.status == TxStatus.frozen && ops.exceptionBlocker(c.id) != null)
+              StateBanner(color: AppColors.danger, icon: Icons.gavel_rounded, text: ops.exceptionBlocker(c.id)!)
+            else if (operate && tx.status == TxStatus.frozen)
               ElevatedButton.icon(
                 onPressed: () => requestExceptionSheet(context, tx),
                 icon: const Icon(Icons.outbox_rounded),

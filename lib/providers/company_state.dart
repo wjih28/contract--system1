@@ -348,6 +348,7 @@ class CompanyState extends ChangeNotifier {
       objectId: objectId,
       result: result,
       evidenceRef: evidenceRef,
+      contractVersion: company == null || company.contractVersion == 0 ? null : company.contractVersion,
     );
     if (isCloud) {
       _cloudAudit = [e, ..._cloudAudit];

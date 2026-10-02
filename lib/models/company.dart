@@ -69,6 +69,7 @@ enum AppModule {
   partners,
   establishment,
   voting,
+  versions,
   approvals,
   transactions,
   disputes,
@@ -81,6 +82,7 @@ enum AppModule {
   votingSettings,
   currencySettings,
   auditLog,
+  versionManager,
   // التشغيل
   operationsDashboard,
   opsTransactions,
@@ -100,6 +102,7 @@ extension AppModuleX on AppModule {
         AppModule.partners => 'الشركاء والحصص',
         AppModule.establishment => 'التأسيس والعقد',
         AppModule.voting => 'مركز التصويت',
+        AppModule.versions => 'إصدارات العقد',
         AppModule.approvals => 'الموافقات والاستثناءات',
         AppModule.transactions => 'العمليات والمخالفات',
         AppModule.disputes => 'النزاعات',
@@ -111,6 +114,7 @@ extension AppModuleX on AppModule {
         AppModule.votingSettings => 'التصويت والنصاب',
         AppModule.currencySettings => 'العملات',
         AppModule.auditLog => 'سجل التدقيق',
+        AppModule.versionManager => 'إدارة الإصدارات',
         AppModule.operationsDashboard => 'لوحة التشغيل',
         AppModule.opsTransactions => 'العمليات المالية',
         AppModule.opsFrozen => 'العمليات المجمّدة',
@@ -127,6 +131,7 @@ extension AppModuleX on AppModule {
         AppModule.partners => Icons.pie_chart_rounded,
         AppModule.establishment => Icons.history_edu_rounded,
         AppModule.voting => Icons.how_to_vote_rounded,
+        AppModule.versions => Icons.layers_rounded,
         AppModule.approvals => Icons.fact_check_rounded,
         AppModule.transactions => Icons.receipt_long_rounded,
         AppModule.disputes => Icons.gavel_rounded,
@@ -138,6 +143,7 @@ extension AppModuleX on AppModule {
         AppModule.votingSettings => Icons.tune_rounded,
         AppModule.currencySettings => Icons.currency_exchange_rounded,
         AppModule.auditLog => Icons.manage_search_rounded,
+        AppModule.versionManager => Icons.account_tree_outlined,
         AppModule.operationsDashboard => Icons.insights_rounded,
         AppModule.opsTransactions => Icons.receipt_long_rounded,
         AppModule.opsFrozen => Icons.ac_unit_rounded,
@@ -158,7 +164,8 @@ extension AppModuleX on AppModule {
         AppModule.logicRules ||
         AppModule.votingSettings ||
         AppModule.currencySettings ||
-        AppModule.auditLog =>
+        AppModule.auditLog ||
+        AppModule.versionManager =>
           Portal.admin,
         AppModule.operationsDashboard ||
         AppModule.opsTransactions ||
@@ -186,6 +193,7 @@ class Permissions {
       AppModule.partners,
       AppModule.establishment,
       AppModule.voting,
+      AppModule.versions,
       AppModule.approvals,
       AppModule.transactions,
       AppModule.disputes,
@@ -198,6 +206,7 @@ class Permissions {
       AppModule.partners,
       AppModule.establishment,
       AppModule.voting,
+      AppModule.versions,
       AppModule.approvals,
       AppModule.transactions,
       AppModule.disputes,
@@ -215,6 +224,7 @@ class Permissions {
       AppModule.expenseLimits,
       AppModule.channels,
       AppModule.integrations,
+      AppModule.versionManager,
       AppModule.auditLog,
       AppModule.profile,
     },
@@ -222,6 +232,7 @@ class Permissions {
       AppModule.questionBank,
       AppModule.clauseLibrary,
       AppModule.logicRules,
+      AppModule.versionManager,
       AppModule.auditLog,
       AppModule.profile,
     },
@@ -415,6 +426,9 @@ class AuditEvent {
   final String result;
   final String? evidenceRef; // مرجع الدليل: بصمة، معرّف رسالة، رقم إصدار
 
+  /// إصدار العقد الساري وقت الحدث (سياق الإصدار في P15)
+  final int? contractVersion;
+
   const AuditEvent({
     required this.id,
     required this.companyId,
@@ -427,7 +441,11 @@ class AuditEvent {
     required this.objectId,
     required this.result,
     this.evidenceRef,
+    this.contractVersion,
   });
+
+  /// حدث نظام (آلي) مقابل فعل مستخدم: يجب التمييز بينهما في العرض
+  bool get isSystem => actorType != ActorType.user;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -441,6 +459,7 @@ class AuditEvent {
         'objectId': objectId,
         'result': result,
         'evidenceRef': evidenceRef,
+        'contractVersion': contractVersion,
       };
 
   factory AuditEvent.fromJson(Map<String, dynamic> j) => AuditEvent(
@@ -455,5 +474,6 @@ class AuditEvent {
         objectId: j['objectId'] as String? ?? '',
         result: j['result'] as String? ?? '',
         evidenceRef: j['evidenceRef'] as String?,
+        contractVersion: (j['contractVersion'] as num?)?.toInt(),
       );
 }

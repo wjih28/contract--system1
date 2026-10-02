@@ -74,12 +74,20 @@ class TxTile extends StatelessWidget {
                   ),
               ]),
             ),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(formatCurrency(tx.amount, tx.currency),
-                  style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w900, fontSize: 15)),
-              const SizedBox(height: 4),
-              TxStatusPill(tx.status),
-            ]),
+            const SizedBox(width: 8),
+            // عمود المبلغ والحالة بعرض محدود حتى لا يتجاوز الشاشة على الجوال
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(formatCurrency(tx.amount, tx.currency),
+                      style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w900, fontSize: 15)),
+                ),
+                const SizedBox(height: 4),
+                FittedBox(fit: BoxFit.scaleDown, child: TxStatusPill(tx.status)),
+              ]),
+            ),
           ]),
         ),
       );

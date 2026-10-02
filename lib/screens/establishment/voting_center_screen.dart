@@ -29,7 +29,7 @@ class _VotingCenterScreenState extends State<VotingCenterScreen> {
     final st = context.watch<ContractState>();
     final s = widget.sessionId != null
         ? st.sessions.where((x) => x.id == widget.sessionId).firstOrNull
-        : st.establishmentFor(cs.current?.id);
+        : (st.activeAmendment(cs.current?.id) ?? st.establishmentFor(cs.current?.id));
     if (s == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('مركز التصويت')),

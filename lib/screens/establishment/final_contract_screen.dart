@@ -32,6 +32,10 @@ class FinalContractScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
           children: [
+            if (s.archived)
+              StateBanner.readOnly(
+                  'إصدار مؤرشف للقراءة فقط · حلّ محله الإصدار ${st.sessions.where((x) => x.id == s.supersededBy).firstOrNull?.version ?? ''}. '
+                  'يبقى متاحاً للتدقيق ولا يمكن تعديله.'),
             if (!finalized)
               StateBanner(
                 color: AppColors.warning,
@@ -43,10 +47,10 @@ class FinalContractScreen extends StatelessWidget {
                 color: intact ? AppColors.success : AppColors.danger,
                 icon: intact ? Icons.verified_rounded : Icons.gpp_bad_rounded,
                 text: intact
-                    ? 'عقد نهائي معتمد · الإصدار 1 · مقفل للقراءة فقط · المحتوى مطابق لمرجع السلامة'
+                    ? 'عقد نهائي معتمد · الإصدار ${s.version} · مقفل للقراءة فقط · المحتوى مطابق لمرجع السلامة'
                     : 'تحذير: محتوى العقد الحالي لا يطابق مرجع السلامة المسجل عند الاعتماد',
               ),
-            Text('عقد تأسيس ${s.companyName}',
+            Text(s.isAmendment ? 'عقد ${s.companyName} · الإصدار ${s.version}' : 'عقد تأسيس ${s.companyName}',
                 style: const TextStyle(color: AppColors.textPrimary, fontSize: 20, fontWeight: FontWeight.w900)),
             if (s.completedAt != null)
               Text('تاريخ النفاذ ${fmt.format(s.completedAt!.toLocal())}',

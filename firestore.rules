@@ -59,13 +59,15 @@ service cloud.firestore {
         && myPhone() in request.resource.data.memberPhones
         && request.resource.data.createdBy == request.auth.uid;
 
-      // هيكل الملكية والأعضاء لا يتغير من الواجهة مباشرة؛
-      // تغييره يكون بقرار وإصدار عقد جديد (المرحلة 3)
+      // الأعضاء وأرقامهم ومنشئ الشركة ثابتة. جدول الحصص لا يتغير إلا مع اعتماد إصدار عقد أحدث
+      // (تعديل جدول الحصص بقرار الشركاء أو تنفيذ صلح أو حكم)
       allow update: if signedIn()
         && myPhone() in resource.data.memberPhones
-        && request.resource.data.members == resource.data.members
         && request.resource.data.memberPhones == resource.data.memberPhones
-        && request.resource.data.createdBy == resource.data.createdBy;
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (request.resource.data.members == resource.data.members
+            || (request.resource.data.contractVersion > resource.data.get("contractVersion", 0)
+                && request.resource.data.members.size() == resource.data.members.size()));
 
       allow delete: if false;
 
@@ -117,6 +119,21 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // تذكرة النزاع (المرحلة 3): دائمة لا تُحذف، وأطرافها ومحفزها ثابتة، والمغلقة لا تُعدَّل
+      match /disputes/{dId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.stage == 'negotiation';
+        allow update: if isCompanyMember(cid)
+          && resource.data.status != 'closed'
+          && request.resource.data.parties == resource.data.parties
+          && request.resource.data.trigger == resource.data.trigger
+          && request.resource.data.openedAt == resource.data.openedAt
+          && request.resource.data.entries.size() >= resource.data.entries.size();
+        allow delete: if false;
+      }
+
       // الإشعار: نصه ودليل تسليمه ثابتان، ويتغير فقط وسم القراءة
       match /notifications/{nId} {
         allow read: if isCompanyMember(cid);
@@ -138,6 +155,14 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.status == 'active'
         && request.resource.data.contentHash == null;
+
+      // العقد المعتمد مقفل؛ الاستثناء الوحيد أرشفته عند اعتماد إصدار أحدث يحل محله
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && resource.data.status == 'completed'
+        && resource.data.get('supersededBy', null) == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['supersededBy', 'archivedAt', 'updatedAt'])
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.supersededBy));
 
       allow update: if signedIn()
         && myPhone() in resource.data.memberPhones

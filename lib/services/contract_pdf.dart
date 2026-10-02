@@ -45,7 +45,7 @@ class ContractPdf {
     final bold = await PdfGoogleFonts.notoNaskhArabicBold();
     final latin = await PdfGoogleFonts.notoSansRegular();
     final doc = pw.Document(
-      title: interim ? 'تقرير مرحلي - ${s.companyName}' : 'عقد تأسيس - ${s.companyName}',
+      title: interim ? 'تقرير مرحلي - ${s.companyName}' : 'عقد تأسيس - ${s.companyName}${s.isAmendment ? ' - الإصدار ${s.version}' : ''}',
       author: 'ميثاق',
       theme: pw.ThemeData.withFont(base: regular, bold: bold, fontFallback: [latin]),
     );
@@ -79,7 +79,7 @@ class ContractPdf {
             children: [
               pw.Text('ميثاق · نظام العقود والحوكمة الذكي',
                   style: pw.TextStyle(color: _gold, fontWeight: pw.FontWeight.bold, fontSize: 10)),
-              pw.Text(interim ? 'تقرير مرحلي – غير نهائي' : 'عقد تأسيس نهائي',
+              pw.Text(interim ? 'تقرير مرحلي – غير نهائي' : (s.isAmendment ? 'عقد معدّل نهائي · الإصدار ${s.version}' : 'عقد تأسيس نهائي'),
                   style: const pw.TextStyle(color: _muted, fontSize: 9)),
             ],
           ),
@@ -107,6 +107,13 @@ class ContractPdf {
             child: pw.Text(s.companyName,
                 style: pw.TextStyle(fontSize: 16, color: _gold, fontWeight: pw.FontWeight.bold)),
           ),
+          if (s.isAmendment) ...[
+            pw.SizedBox(height: 6),
+            pw.Center(
+              child: pw.Text('الإصدار ${s.version} · ${s.changeType.label} · ${s.changeSummary ?? ''}',
+                  style: const pw.TextStyle(fontSize: 9, color: _muted)),
+            ),
+          ],
           pw.SizedBox(height: 16),
           _kv([
             ('الشكل القانوني', s.companyType),

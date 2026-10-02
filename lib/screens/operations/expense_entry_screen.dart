@@ -82,6 +82,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
               ),
             DropdownButtonFormField<TxCategory>(
               initialValue: _cat,
+              isExpanded: true,
               dropdownColor: AppColors.navySurface,
               decoration: const InputDecoration(labelText: 'الفئة'),
               items: TxCategory.values.map((x) => DropdownMenuItem(value: x, child: Text(x.label))).toList(),

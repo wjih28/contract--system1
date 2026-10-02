@@ -111,7 +111,7 @@ class _Card extends StatelessWidget {
               if (status == ViolationStatus.disputed)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child: Text('تذكرة النزاع ومراحل التسوية تُبنى في المرحلة 3، والإحالة محفوظة في السجل من الآن.',
+                  child: Text('عند الحفظ تُفتح تذكرة نزاع تبدأ بالتفاوض المباشر، وتُقفل تعديلات العقد مؤقتاً حتى تُحسم.',
                       style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
                 ),
               const SizedBox(height: 10),

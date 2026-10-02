@@ -301,7 +301,7 @@ class OperationsState extends ChangeNotifier {
       ? 'الاستثناءات موقوفة مؤقتاً لأن نزاعاً في مرحلة التحكيم، حتى صدور الحكم'
       : null;
 
-  /// يُستدعى عند تصعيد مخالفة: تُفتح بها تذكرة نزاع
+  /// يُستدعى عند إحالة مخالفة إلى نزاع: تُفتح بها تذكرة نزاع
   void Function(Company c, Violation v)? onViolationEscalated;
 
   /// طلب استثناء لمرة واحدة لعملية مجمّدة. لا يعدّل القاعدة ولا العقد.
@@ -437,7 +437,7 @@ class OperationsState extends ChangeNotifier {
     _put(c.id, 'violations', v.id, v.toJson());
     _log(c.id, 'تحديث المخالفة ${v.id}', 'violation', v.id,
         before == v.status ? 'إضافة معلومات' : '${before.label} ← ${v.status.label}');
-    if (before != ViolationStatus.escalated && v.status == ViolationStatus.escalated) onViolationEscalated?.call(c, v);
+    if (before != ViolationStatus.disputed && v.status == ViolationStatus.disputed) onViolationEscalated?.call(c, v);
     _changed();
   }
 

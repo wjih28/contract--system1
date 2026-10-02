@@ -21,7 +21,9 @@ import '../contracts_screen.dart';
 import '../company/my_companies_screen.dart';
 import '../company/partner_dashboard_screen.dart';
 import '../establishment/voting_center_screen.dart';
-import '../dispute_room_screen.dart';
+import '../admin/version_manager_screen.dart';
+import '../disputes/disputes_screen.dart';
+import '../versions/versions_screen.dart';
 import '../profile_screen.dart';
 import '../../providers/dispute_state.dart';
 import '../../providers/operations_state.dart';
@@ -167,7 +169,9 @@ class _AppShellState extends State<AppShell> {
         AppModule.voting => const VotingCenterScreen(),
         AppModule.approvals => const ApprovalsScreen(),
         AppModule.transactions => const TransactionsScreen(),
-        AppModule.disputes => const _Demo(child: DisputeRoomScreen()),
+        AppModule.disputes => const DisputesScreen(),
+        AppModule.versions => const VersionsScreen(),
+        AppModule.versionManager => const VersionManagerScreen(),
         AppModule.notifications => const NotificationsCenterScreen(),
         AppModule.profile => const ProfileScreen(),
         AppModule.questionBank => const QuestionBankScreen(),
@@ -306,18 +310,4 @@ class _NoCompany extends StatelessWidget {
       ),
     );
   }
-}
-
-/// غلاف للشاشات التي ما زالت تعرض بيانات تجريبية: يوضح ذلك صراحة للمستخدم
-class _Demo extends StatelessWidget {
-  final Widget child;
-  const _Demo({required this.child});
-
-  @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 0), child: StateBanner.demo()),
-          Expanded(child: child),
-        ],
-      );
 }
