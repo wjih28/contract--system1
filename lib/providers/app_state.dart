@@ -20,36 +20,36 @@ class AppState extends ChangeNotifier {
   final List<Partner> partners = const [
     Partner(
       id: 'p1',
-      fullName: 'خالد المطيري',
-      officialEmail: 'khaled@mithaq-group.com',
-      phoneNumber: '+965 5555 1234',
+      fullName: 'خالد العولقي',
+      officialEmail: 'khaled@mithaq-ye.com',
+      phoneNumber: '+967 771 234 567',
       equityPercentage: 45,
       role: UserRole.executivePartner,
       avatarInitial: 'خ',
     ),
     Partner(
       id: 'p2',
-      fullName: 'سارة العنزي',
-      officialEmail: 'sara@mithaq-group.com',
-      phoneNumber: '+965 5555 5678',
+      fullName: 'سارة الحضرمي',
+      officialEmail: 'sara@mithaq-ye.com',
+      phoneNumber: '+967 733 567 890',
       equityPercentage: 35,
       role: UserRole.investorPartner,
       avatarInitial: 'س',
     ),
     Partner(
       id: 'p3',
-      fullName: 'أ. فيصل الحربي',
-      officialEmail: 'faisal.lawyer@mithaq-legal.com',
-      phoneNumber: '+965 5555 9012',
+      fullName: 'أ. فيصل الشرعبي',
+      officialEmail: 'faisal.lawyer@mithaq-legal.ye',
+      phoneNumber: '+967 777 901 234',
       equityPercentage: 0,
       role: UserRole.lawyer,
       avatarInitial: 'ف',
     ),
     Partner(
       id: 'p4',
-      fullName: 'منى الرشيدي',
-      officialEmail: 'mona@mithaq-group.com',
-      phoneNumber: '+965 5555 3456',
+      fullName: 'منى الصنعاني',
+      officialEmail: 'mona@mithaq-ye.com',
+      phoneNumber: '+967 711 345 678',
       equityPercentage: 20,
       role: UserRole.investorPartner,
       avatarInitial: 'م',
@@ -78,7 +78,7 @@ class AppState extends ChangeNotifier {
       date: DateTime.now().subtract(const Duration(hours: 8)),
       status: TransactionStatus.frozen,
       clauseReference: 'البند 14 - سقف الصرف اللحظي للمدير التنفيذي',
-      triggeredRule: 'MAX_SINGLE_EXPENSE (الحد: 2,000 د.ك)',
+      triggeredRule: 'MAX_SINGLE_EXPENSE (الحد: \$2,000)',
     ),
     LedgerTransaction(
       id: 't1004',
@@ -95,7 +95,7 @@ class AppState extends ChangeNotifier {
       amount: 12500,
       date: DateTime.now().subtract(const Duration(days: 2)),
       status: TransactionStatus.pendingApproval,
-      clauseReference: 'البند 9 - شرط الاعتماد الثنائي للعقود > 10,000 د.ك',
+      clauseReference: 'البند 9 - شرط الاعتماد الثنائي للعقود > \$10,000',
     ),
     LedgerTransaction(
       id: 't1006',
@@ -110,39 +110,12 @@ class AppState extends ChangeNotifier {
     38, 42, 40, 55, 60, 58, 66, 70, 68, 75, 82, 85,
   ];
 
-  final List<ContractClause> clauses = const [
-    ContractClause(
-      id: 45,
-      category: 'مالي وتشغيلي',
-      text:
-          'يُحدد سقف الصرف اللحظي للشريك المدير بمبلغ 2,000 د.ك لكل عملية شراء أو سند صرف منفرد، على أن يُشترط الاعتماد الثنائي لما يتجاوز هذا السقف.',
-      requiredQuorumLabel: 'ثلثين (66.6%)',
-      requiredQuorumValue: 66.6,
-    ),
-    ContractClause(
-      id: 46,
-      category: 'حوكمة',
-      text:
-          'يُحظر على أي شريك تنفيذي منح نفسه سلفاً شخصية أو زيادة راتبه دون موافقة صريحة ومسبقة من الشركاء الممثلين لثلثي رأس المال.',
-      requiredQuorumLabel: 'ثلثين (66.6%)',
-      requiredQuorumValue: 66.6,
-    ),
-    ContractClause(
-      id: 47,
-      category: 'تصفية وتخارج',
-      text:
-          'في حال وصول الخسائر التراكمية إلى 50% من رأس المال، تُدعى الجمعية العمومية لعقد اجتماع طارئ خلال 15 يوماً لاتخاذ قرار الاستمرار أو التصفية.',
-      requiredQuorumLabel: 'إجماع (100%)',
-      requiredQuorumValue: 100,
-    ),
-  ];
-
   final List<AuditNotification> notifications = [
     AuditNotification(
       id: 'n1',
       title: 'تنبيه حوكمة: تجاوز سقف الصرف',
       body:
-          'حاول الشريك المدير تمرير عملية صرف بقيمة 3,500 د.ك (تتجاوز السقف المحدد بـ 2,000 د.ك). يرجى اتخاذ إجراء.',
+          'حاول الشريك المدير تمرير عملية صرف بقيمة \$3,500 (تتجاوز السقف المحدد بـ \$2,000). يرجى اتخاذ إجراء.',
       channel: NotifyChannel.whatsapp,
       sentAt: DateTime.now().subtract(const Duration(hours: 8, minutes: 2)),
       deliveredAt: DateTime.now().subtract(const Duration(hours: 8, minutes: 1)),
@@ -162,7 +135,7 @@ class AppState extends ChangeNotifier {
     AuditNotification(
       id: 'n3',
       title: 'طلب اعتماد ثنائي',
-      body: 'عقد صيانة سنوي بقيمة 12,500 د.ك يتطلب توقيعك كشريك غير تنفيذي.',
+      body: 'عقد صيانة سنوي بقيمة \$12,500 يتطلب توقيعك كشريك غير تنفيذي.',
       channel: NotifyChannel.sms,
       sentAt: DateTime.now().subtract(const Duration(days: 2, hours: 3)),
       deliveredAt: DateTime.now().subtract(const Duration(days: 2, hours: 3)),
@@ -174,7 +147,7 @@ class AppState extends ChangeNotifier {
   final List<DisputeCase> disputes = [
     DisputeCase(
       id: 'd1',
-      title: 'مخالفة سقف الصرف - سند 3,500 د.ك',
+      title: 'مخالفة سقف الصرف - سند \$3,500',
       clauseText: 'البند 14 - سقف الصرف اللحظي للمدير التنفيذي',
       status: 'قيد الترافع',
       disputedAmount: 3500,

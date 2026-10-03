@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/questionnaire.dart';
 import '../theme/app_theme.dart';
 
 /// خلفية مزخرفة بنقشة هندسية إسلامية خفيفة (Corner Pattern)
@@ -219,12 +220,16 @@ class MithaqLogo extends StatelessWidget {
   }
 }
 
-String formatCurrency(double value) {
+/// تنسيق المبالغ بالعملات المعتمدة: الدولار الأمريكي (افتراضي) والريال السعودي
+String formatCurrency(double value, [AppCurrency currency = AppCurrency.usd]) {
   final isNeg = value < 0;
   final v = value.abs();
   final s = v.toStringAsFixed(0).replaceAllMapped(
         RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
         (m) => '${m[1]},',
       );
-  return '${isNeg ? '-' : ''}$s د.ك';
+  final sign = isNeg ? '-' : '';
+  return currency == AppCurrency.usd
+      ? '$sign\$$s'
+      : '$sign$s ${currency.symbol}';
 }

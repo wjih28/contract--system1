@@ -4,7 +4,7 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import 'main_shell.dart';
+import 'shell/app_shell.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,7 +14,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailCtrl = TextEditingController(text: 'khaled@mithaq-group.com');
+  final _emailCtrl = TextEditingController(text: 'khaled@mithaq-ye.com');
   final _passCtrl = TextEditingController(text: '••••••••');
   bool _loading = false;
   bool _obscure = true;
@@ -35,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 450),
-        pageBuilder: (_, __, ___) => const MainShell(),
+        pageBuilder: (_, __, ___) => const AppShell(),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
       ),
@@ -186,7 +186,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           appState.login(p);
                           Navigator.of(context).pushReplacement(
                             MaterialPageRoute(
-                              builder: (_) => const MainShell(),
+                              builder: (_) => const AppShell(),
                             ),
                           );
                         },
