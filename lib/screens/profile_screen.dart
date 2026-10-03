@@ -4,7 +4,9 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../services/backend.dart';
 import 'login_screen.dart';
+import 'phone_login_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -86,10 +88,14 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             OutlinedButton.icon(
-              onPressed: () {
+              onPressed: () async {
                 appState.logout();
+                await Backend.signOut(context);
+                if (!context.mounted) return;
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => Backend.ready ? const PhoneLoginScreen() : const LoginScreen(),
+                  ),
                   (route) => false,
                 );
               },
