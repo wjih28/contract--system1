@@ -104,41 +104,6 @@ class LedgerTransaction {
   });
 }
 
-/// خيار التصويت على بند تعاقدي
-enum VoteChoice { agree, disagree, neutral, defer }
-
-extension VoteChoiceX on VoteChoice {
-  String get label {
-    switch (this) {
-      case VoteChoice.agree:
-        return 'موافق';
-      case VoteChoice.disagree:
-        return 'غير موافق';
-      case VoteChoice.neutral:
-        return 'محايد';
-      case VoteChoice.defer:
-        return 'تأجيل';
-    }
-  }
-}
-
-/// بند تعاقدي من بنك الأسئلة
-class ContractClause {
-  final int id;
-  final String category;
-  final String text;
-  final String requiredQuorumLabel;
-  final double requiredQuorumValue;
-
-  const ContractClause({
-    required this.id,
-    required this.category,
-    required this.text,
-    required this.requiredQuorumLabel,
-    required this.requiredQuorumValue,
-  });
-}
-
 /// قناة الإشعار
 enum NotifyChannel { email, sms, whatsapp }
 
