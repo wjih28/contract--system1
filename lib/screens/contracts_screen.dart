@@ -1,264 +1,275 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../models/models.dart';
-import '../providers/app_state.dart';
+
+import '../models/questionnaire.dart';
+import '../providers/company_state.dart';
+import '../providers/contract_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'contract/session_overview_screen.dart';
 
-class ContractsScreen extends StatefulWidget {
+/// تبويب العقود: جلسات إعداد عقود التأسيس عبر الاستبانة الذكية
+class ContractsScreen extends StatelessWidget {
   const ContractsScreen({super.key});
 
   @override
-  State<ContractsScreen> createState() => _ContractsScreenState();
+  Widget build(BuildContext context) {
+    final state = context.watch<ContractState>();
+    final company = context.watch<CompanyState>().current;
+    // جلسات الشركة الحالية فقط، والجلسات القديمة غير المرتبطة بشركة تظهر عند عدم وجود شركة
+    final sessions = state.sessionsFor(company?.id);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('التأسيس والعقد')),
+      // الشركة الواحدة لها جلسة تأسيس واحدة؛ تعديل العقد بعد اعتماده يكون بإصدار جديد (المرحلة 3)
+      floatingActionButton: company == null || sessions.isNotEmpty
+          ? null
+          : FloatingActionButton.extended(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.navyDark,
+              onPressed: () {
+                final s = state.createSession(
+                  companyId: company.id,
+                  companyName: company.legalName,
+                  companyType: company.companyType,
+                  currency: company.currency,
+                  capital: company.capital,
+                  partners: company.partners.map((m) => m.toSessionPartner()).toList(),
+                );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => SessionOverviewScreen(sessionId: s.id)),
+                );
+              },
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('بدء جلسة التأسيس', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+      body: !state.loaded
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+              children: [
+                _IntroCard(bankSize: state.bank.length),
+                const SizedBox(height: 22),
+                SectionHeader(title: 'الجلسات (${sessions.length})'),
+                const SizedBox(height: 10),
+                if (sessions.isEmpty) const _EmptyState(),
+                ...sessions.map((s) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _SessionCard(session: s),
+                    )),
+              ],
+            ),
+    );
+  }
 }
 
-class _ContractsScreenState extends State<ContractsScreen> {
-  int _currentIndex = 0;
-  final Map<int, VoteChoice> _votes = {};
+class _IntroCard extends StatelessWidget {
+  final int bankSize;
+  const _IntroCard({required this.bankSize});
 
   @override
   Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
-    final clauses = appState.clauses;
-    final clause = clauses[_currentIndex];
-    final totalQuestions = 200; // بنك افتراضي كامل للعرض
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('جلسة التصويت على العقد')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [AppColors.navySurface, AppColors.navyLight],
+        ),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.35)),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(painter: GeometricCornerPainter()),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              const Row(
                 children: [
+                  Icon(Icons.auto_awesome_rounded, color: AppColors.gold, size: 22),
+                  SizedBox(width: 8),
                   Text(
-                    'البند ${clause.id} من $totalQuestions',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                    'المحامي الذكي لعقد التأسيس',
+                    style: TextStyle(
+                      color: AppColors.gold,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
                     ),
-                  ),
-                  StatusChip(
-                    label: clause.category,
-                    color: AppColors.info,
-                    icon: Icons.category_rounded,
                   ),
                 ],
               ),
               const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(
-                  value: clause.id / totalQuestions,
-                  minHeight: 7,
-                  backgroundColor: AppColors.navyLight,
-                  color: AppColors.gold,
+              const Text(
+                'يعرض عليكم النظام البنود واحداً تلو الآخر مع سؤال توعوي لكل بند. يصوت كل شريك ويؤكد هويته، ولا يصدر العقد إلا بعد التراضي على كل البنود.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.7,
                 ),
               ),
-              const SizedBox(height: 24),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      GoldBorderCard(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: const [
-                                Icon(
-                                  Icons.article_rounded,
-                                  color: AppColors.gold,
-                                  size: 20,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  'نص البند التعاقدي',
-                                  style: TextStyle(
-                                    color: AppColors.gold,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            Text(
-                              clause.text,
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 15,
-                                height: 1.8,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _QuorumIndicator(clause: clause, votes: _votes, partners: appState.partners),
-                      const SizedBox(height: 18),
-                      const SectionHeader(title: 'موقف الشركاء'),
-                      const SizedBox(height: 10),
-                      ...appState.partners
-                          .where((p) => p.equityPercentage > 0)
-                          .map((p) => _PartnerVoteRow(
-                                partner: p,
-                                vote: _votes[clause.id],
-                              )),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Expanded(
-                    child: _VoteButton(
-                      label: 'موافق',
-                      color: AppColors.success,
-                      icon: Icons.check_circle_rounded,
-                      selected: _votes[clause.id] == VoteChoice.agree,
-                      onTap: () => _vote(clause.id, VoteChoice.agree),
-                    ),
+                  StatusChip(
+                    label: '$bankSize بنداً في البنك',
+                    color: AppColors.gold,
+                    icon: Icons.library_books_rounded,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _VoteButton(
-                      label: 'غير موافق',
-                      color: AppColors.danger,
-                      icon: Icons.cancel_rounded,
-                      selected: _votes[clause.id] == VoteChoice.disagree,
-                      onTap: () => _vote(clause.id, VoteChoice.disagree),
-                    ),
+                  const StatusChip(
+                    label: 'نصاب مرجّح بالحصص',
+                    color: AppColors.info,
+                    icon: Icons.pie_chart_rounded,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _VoteButton(
-                      label: 'محايد',
-                      color: AppColors.textMuted,
-                      icon: Icons.remove_circle_rounded,
-                      selected: _votes[clause.id] == VoteChoice.neutral,
-                      onTap: () => _vote(clause.id, VoteChoice.neutral),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _vote(clause.id, VoteChoice.defer),
-                      icon: const Icon(Icons.schedule_rounded, size: 18),
-                      label: const Text('تأجيل البند'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _votes[clause.id] == null
-                          ? null
-                          : () {
-                              if (_currentIndex < clauses.length - 1) {
-                                setState(() => _currentIndex++);
-                              } else {
-                                _showSignatureSheet(context);
-                              }
-                            },
-                      icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                      label: Text(
-                        _currentIndex < clauses.length - 1
-                            ? 'التالي'
-                            : 'إنهاء الجلسة والتوقيع',
-                      ),
-                    ),
+                  const StatusChip(
+                    label: 'حفظ تلقائي واستئناف',
+                    color: AppColors.success,
+                    icon: Icons.cloud_done_rounded,
                   ),
                 ],
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  void _vote(int id, VoteChoice v) => setState(() => _votes[id] = v);
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
 
-  void _showSignatureSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.navySurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  @override
+  Widget build(BuildContext context) {
+    return GoldBorderCard(
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.gold.withValues(alpha: 0.1),
+            ),
+            child: const Icon(Icons.history_edu_rounded,
+                color: AppColors.gold, size: 40),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'لا توجد جلسات بعد',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'ابدأ جلسة تأسيس جديدة لصياغة عقد شركتكم بالتصويت على البنود',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.5, height: 1.6),
+          ),
+        ],
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
+    );
+  }
+}
+
+class _SessionCard extends StatelessWidget {
+  final ContractSession session;
+  const _SessionCard({required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = session;
+    final pct = (s.progress * 100).round();
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => SessionOverviewScreen(sessionId: s.id)),
+      ),
+      child: GoldBorderCard(
         child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Center(
-              child: Icon(
-                Icons.verified_rounded,
-                color: AppColors.gold,
-                size: 44,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'التوثيق النهائي للجلسة',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'التقط بصمتك الحيوية ووقّع لإتمام إقرارك بكافة البنود المتراضى عليها',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12.5),
-            ),
-            const SizedBox(height: 22),
             Row(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.fingerprint_rounded),
-                    label: const Text('البصمة الحيوية'),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: s.status.color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Icon(Icons.business_rounded, color: s.status.color, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.draw_rounded),
-                    label: const Text('التوقيع'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        s.companyName,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${s.companyType} · ${s.partners.length} شركاء · ${formatCurrency(s.capital, s.currency)}',
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                      ),
+                    ],
                   ),
+                ),
+                StatusChip(
+                  label: s.status.label,
+                  color: s.status.color,
+                  icon: Icons.circle,
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'تم توليد العقد النهائي PDF/A مع QR كود التحقق ✅',
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: s.progress,
+                      minHeight: 7,
+                      backgroundColor: AppColors.navyLight,
+                      color: pct == 100 ? AppColors.success : AppColors.gold,
                     ),
                   ),
-                );
-              },
-              child: const Text('تأكيد وتوليد العقد النهائي'),
+                ),
+                const SizedBox(width: 10),
+                Text('$pct%',
+                    style: const TextStyle(
+                        color: AppColors.gold, fontWeight: FontWeight.w800, fontSize: 12.5)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _Mini(ClauseStatus.agreed, s.count(ClauseStatus.agreed)),
+                _Mini(ClauseStatus.deferred, s.count(ClauseStatus.deferred)),
+                _Mini(ClauseStatus.rejected, s.count(ClauseStatus.rejected)),
+                const Spacer(),
+                Text(
+                  DateFormat('d/M/yyyy – HH:mm').format(s.updatedAt),
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10.5),
+                ),
+              ],
             ),
           ],
         ),
@@ -267,172 +278,22 @@ class _ContractsScreenState extends State<ContractsScreen> {
   }
 }
 
-class _QuorumIndicator extends StatelessWidget {
-  final ContractClause clause;
-  final Map<int, VoteChoice> votes;
-  final List<Partner> partners;
-
-  const _QuorumIndicator({
-    required this.clause,
-    required this.votes,
-    required this.partners,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final currentVote = votes[clause.id];
-    double agreedEquity = 0;
-    if (currentVote == VoteChoice.agree) {
-      agreedEquity = partners
-          .where((p) => p.role != UserRole.lawyer)
-          .fold(0, (sum, p) => sum + p.equityPercentage);
-    }
-    final ratio = (agreedEquity / clause.requiredQuorumValue).clamp(0, 1.0);
-
-    return GoldBorderCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'النصاب المطلوب لهذا البند',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                clause.requiredQuorumLabel,
-                style: const TextStyle(
-                  color: AppColors.gold,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: ratio.toDouble(),
-              minHeight: 10,
-              backgroundColor: AppColors.navyLight,
-              color: ratio >= 1 ? AppColors.success : AppColors.gold,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${agreedEquity.toStringAsFixed(1)}% من الحصص وافقت حتى الآن',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PartnerVoteRow extends StatelessWidget {
-  final Partner partner;
-  final VoteChoice? vote;
-  const _PartnerVoteRow({required this.partner, required this.vote});
+class _Mini extends StatelessWidget {
+  final ClauseStatus status;
+  final int n;
+  const _Mini(this.status, this.n);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsetsDirectional.only(end: 12),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: AppColors.gold.withValues(alpha: 0.15),
-            child: Text(
-              partner.avatarInitial,
-              style: const TextStyle(color: AppColors.gold, fontSize: 12),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '${partner.fullName} (${partner.equityPercentage.toStringAsFixed(0)}%)',
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 12.5,
-              ),
-            ),
-          ),
-          if (vote != null)
-            StatusChip(
-              label: vote!.label,
-              color: vote == VoteChoice.agree
-                  ? AppColors.success
-                  : vote == VoteChoice.disagree
-                      ? AppColors.danger
-                      : AppColors.textMuted,
-              icon: vote == VoteChoice.agree
-                  ? Icons.check_rounded
-                  : vote == VoteChoice.disagree
-                      ? Icons.close_rounded
-                      : Icons.remove_rounded,
-            )
-          else
-            const Text(
-              'بانتظار التصويت',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 11),
-            ),
+          Icon(status.icon, size: 13, color: status.color),
+          const SizedBox(width: 3),
+          Text('$n ${status.label}',
+              style: TextStyle(color: status.color, fontSize: 10.5, fontWeight: FontWeight.w700)),
         ],
-      ),
-    );
-  }
-}
-
-class _VoteButton extends StatelessWidget {
-  final String label;
-  final Color color;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _VoteButton({
-    required this.label,
-    required this.color,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.18) : AppColors.navySurface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? color : AppColors.divider,
-            width: selected ? 1.6 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: selected ? color : AppColors.textMuted, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: selected ? color : AppColors.textMuted,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

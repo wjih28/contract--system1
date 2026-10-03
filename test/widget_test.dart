@@ -11,5 +11,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('ميثاق'), findsOneWidget);
+
+    // تجاوز مؤقت شاشة البداية حتى لا يبقى مؤقت معلق بعد انتهاء الاختبار
+    await tester.pump(const Duration(seconds: 3));
   });
 }
