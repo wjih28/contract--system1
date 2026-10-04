@@ -14,6 +14,7 @@ import '../admin/currency_settings_screen.dart';
 import '../admin/logic_rules_screen.dart';
 import '../admin/voting_settings_screen.dart';
 import '../company/audit_log_screen.dart';
+import '../company/compliance_screen.dart';
 import '../company/partners_screen.dart';
 import '../contract/new_session_screen.dart';
 import '../contract/question_bank_screen.dart';
@@ -253,6 +254,7 @@ class _AppShellState extends State<AppShell> {
         AppModule.proComments => const ProCommentsScreen(),
         AppModule.proArchive => const ProArchiveScreen(),
         AppModule.professionalReviews => const ProfessionalReviewsScreen(),
+        AppModule.compliance => const ComplianceScreen(),
         AppModule.familyDashboard => const FamilyDashboardScreen(),
         AppModule.familyConstitution => const ConstitutionScreen(),
         AppModule.familyTree => const FamilyTreeScreen(),

@@ -124,6 +124,8 @@ enum AppModule {
   proArchive,
   // المراجعات المهنية من جهة الشركة (الشركاء ومسؤول النظام)
   professionalReviews,
+  // الامتثال القانوني (القانون اليمني)
+  compliance,
   // الحوكمة العائلية
   familyDashboard,
   familyConstitution,
@@ -184,6 +186,7 @@ extension AppModuleX on AppModule {
         AppModule.proComments => 'التعليقات',
         AppModule.proArchive => 'أرشيف المستندات',
         AppModule.professionalReviews => 'المراجعات المهنية',
+        AppModule.compliance => 'الامتثال القانوني',
         AppModule.familyDashboard => 'لوحة العائلة',
         AppModule.familyConstitution => 'الدستور العائلي',
         AppModule.familyTree => 'العائلة والورثة',
@@ -242,6 +245,7 @@ extension AppModuleX on AppModule {
         AppModule.proComments => Icons.forum_rounded,
         AppModule.proArchive => Icons.inventory_2_rounded,
         AppModule.professionalReviews => Icons.rate_review_rounded,
+        AppModule.compliance => Icons.verified_user_rounded,
         AppModule.familyDashboard => Icons.family_restroom_rounded,
         AppModule.familyConstitution => Icons.menu_book_rounded,
         AppModule.familyTree => Icons.account_tree_rounded,
@@ -255,7 +259,8 @@ extension AppModuleX on AppModule {
       this == AppModule.profile ||
       this == AppModule.auditLog ||
       this == AppModule.notifications ||
-      this == AppModule.professionalReviews;
+      this == AppModule.professionalReviews ||
+      this == AppModule.compliance;
 
   Portal get portal => switch (this) {
         AppModule.adminDashboard ||
@@ -338,6 +343,7 @@ class Permissions {
       AppModule.opsReports,
       AppModule.partnerReports,
       AppModule.professionalReviews,
+      AppModule.compliance,
       ...kFamilyModules,
       AppModule.dashboard,
       AppModule.partners,
@@ -354,6 +360,7 @@ class Permissions {
     CompanyRole.partner: {
       AppModule.partnerReports,
       AppModule.professionalReviews,
+      AppModule.compliance,
       ...kFamilyModules,
       AppModule.dashboard,
       AppModule.partners,
@@ -390,6 +397,7 @@ class Permissions {
       AppModule.profile,
     },
     CompanyRole.legalAdmin: {
+      AppModule.compliance,
       AppModule.adminDashboard,
       AppModule.questionBank,
       AppModule.clauseLibrary,
@@ -555,6 +563,12 @@ class CompanyMember {
   final bool staff;
   final MemberStatus status;
 
+  /// الصفة القانونية (القانون اليمني): فئة الشريك في شركات التوصية، والجنسية، والولي للقاصر
+  final String? partnerClass; // general / limited
+  final bool yemeni;
+  final String? guardianName;
+  final String? guardianshipRef;
+
   const CompanyMember({
     required this.id,
     required this.name,
@@ -564,7 +578,14 @@ class CompanyMember {
     this.equity = 0,
     this.staff = false,
     this.status = MemberStatus.active,
+    this.partnerClass,
+    this.yemeni = true,
+    this.guardianName,
+    this.guardianshipRef,
   });
+
+  /// قاصر أو ناقص أهلية يمثّله وليّه أو وصيّه
+  bool get minor => guardianName != null && guardianName!.isNotEmpty;
 
   bool get isPartner => roles.any((r) => r.isPartner);
   bool get active => status == MemberStatus.active;
@@ -578,10 +599,21 @@ class CompanyMember {
         equity: equity ?? this.equity,
         staff: staff,
         status: status ?? this.status,
+        partnerClass: partnerClass,
+        yemeni: yemeni,
+        guardianName: guardianName,
+        guardianshipRef: guardianshipRef,
       );
 
-  SessionPartner toSessionPartner() =>
-      SessionPartner(id: id, name: name, nationalId: nationalId, phone: phone, equity: equity);
+  SessionPartner toSessionPartner() => SessionPartner(
+      id: id,
+      name: name,
+      nationalId: nationalId,
+      phone: phone,
+      equity: equity,
+      partnerClass: partnerClass,
+      guardianName: guardianName,
+      guardianshipRef: guardianshipRef);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -592,6 +624,10 @@ class CompanyMember {
         'equity': equity,
         if (staff) 'staff': true,
         if (status != MemberStatus.active) 'status': status.name,
+        if (partnerClass != null) 'partnerClass': partnerClass,
+        if (!yemeni) 'yemeni': false,
+        if (guardianName != null) 'guardianName': guardianName,
+        if (guardianshipRef != null) 'guardianshipRef': guardianshipRef,
       };
 
   factory CompanyMember.fromJson(Map<String, dynamic> j) => CompanyMember(
@@ -603,6 +639,10 @@ class CompanyMember {
         equity: (j['equity'] as num?)?.toDouble() ?? 0,
         staff: j['staff'] as bool? ?? false,
         status: MemberStatus.values.byName(j['status'] as String? ?? 'active'),
+        partnerClass: j['partnerClass'] as String?,
+        yemeni: j['yemeni'] as bool? ?? true,
+        guardianName: j['guardianName'] as String?,
+        guardianshipRef: j['guardianshipRef'] as String?,
       );
 }
 
@@ -623,6 +663,15 @@ class Company {
   // ───── الإدارة (المرحلة 4) ─────
   /// الحوكمة العائلية مفعّلة (شركة عائلية): وحدة اختيارية يفعّلها الشركاء
   bool familyEnabled;
+
+  /// أغراض الشركة (بند جوهري في عقد التأسيس)
+  String purpose;
+
+  /// سعر الصرف المعتمد بالريال اليمني لكل وحدة من عملة العقد (للتحقق من الحد الأدنى لرأس المال)
+  double? yerRate;
+
+  /// خطوات الشهر والاستيفاء القانوني: الخطوة ← {done, ref, at}
+  Map<String, Map<String, dynamic>> compliance;
 
   /// تخصيص مصفوفة الصلاحيات: الدور ← الوحدة ← الإجراءات
   Map<String, Map<String, List<String>>> permissions;
@@ -661,7 +710,11 @@ class Company {
     Map<String, Map<String, dynamic>>? triage,
     Map<String, String>? lastSeen,
     this.familyEnabled = false,
-  })  : permissions = permissions ?? {},
+    this.purpose = '',
+    this.yerRate,
+    Map<String, Map<String, dynamic>>? compliance,
+  })  : compliance = compliance ?? {},
+        permissions = permissions ?? {},
         controlPoints = controlPoints ?? {},
         consents = consents ?? {},
         settings = settings ?? {},
@@ -713,6 +766,9 @@ class Company {
         'triage': triage,
         'lastSeen': lastSeen,
         'familyEnabled': familyEnabled,
+        'purpose': purpose,
+        'yerRate': yerRate,
+        'compliance': compliance,
         // من يصل إلى بيانات العائلة (تتحقق منها قواعد الأمان): الشركاء وأفراد العائلة المدعوون
         'familyPhones': familyEnabled
             ? members
@@ -753,6 +809,10 @@ class Company {
             .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map))),
         lastSeen: Map<String, dynamic>.from(j['lastSeen'] as Map? ?? {}).map((k, v) => MapEntry(k, '$v')),
         familyEnabled: j['familyEnabled'] as bool? ?? false,
+        purpose: j['purpose'] as String? ?? '',
+        yerRate: (j['yerRate'] as num?)?.toDouble(),
+        compliance: Map<String, dynamic>.from(j['compliance'] as Map? ?? {})
+            .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map))),
       );
 
   static Map<String, Map<String, List<String>>> _nested(Object? raw) =>

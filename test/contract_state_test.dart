@@ -127,7 +127,7 @@ void main() {
     expect(rec('L01').status, ClauseStatus.pending); // صوت واحد من ثلاثة
     expect(rec('L03').status, ClauseStatus.deferred);
     expect(rec('L02').neutralConsents, {'b'});
-    expect(r.records.map((x) => x.key).first, 'L01'); // ترتيب البنود محفوظ
+    expect(r.records.map((x) => x.key).first, 'L00'); // ترتيب البنود محفوظ (الأغراض أولاً)
   });
 
   test('توحيد أرقام الجوال اليمنية', () {

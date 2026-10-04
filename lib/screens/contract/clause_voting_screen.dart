@@ -600,9 +600,10 @@ class _Outcome extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _neutralize(context),
+                    // البند الجوهري لا يُحيَّد في عقد التأسيس (القانون اليمني)
+                    onPressed: state.canNeutralize(record) ? () => _neutralize(context) : null,
                     icon: const Icon(Icons.block_rounded, size: 18),
-                    label: const Text('تحييد'),
+                    label: Text(state.canNeutralize(record) ? 'تحييد' : 'بند جوهري'),
                   ),
                 ),
               ],
@@ -624,7 +625,7 @@ class _Outcome extends StatelessWidget {
               icon: const Icon(Icons.lock_open_rounded, size: 18),
               label: const Text('إعادة فتحه للتصويت'),
             ),
-            if (st == ClauseStatus.deferred) ...[
+            if (st == ClauseStatus.deferred && state.canNeutralize(record)) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: () => _neutralize(context),

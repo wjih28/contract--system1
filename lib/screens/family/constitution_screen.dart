@@ -70,6 +70,8 @@ class _ConstitutionScreenState extends State<ConstitutionScreen> {
             ],
             if (shown != null) ...[
               const SizedBox(height: 10),
+              StateBanner.readOnly(
+                  'الميثاق العائلي ملزم بين أفراد العائلة، ولا يسري على الشركة والغير إلا بإدماج أحكامه في النظام الأساسي المشهر بالسجل التجاري.'),
               StateBanner(
                 color: shown.status == ConstitutionStatus.current ? AppColors.success : AppColors.info,
                 icon: Icons.menu_book_rounded,

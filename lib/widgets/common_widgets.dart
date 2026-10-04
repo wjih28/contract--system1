@@ -175,15 +175,17 @@ class GoldBorderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Material بدل Container حتى تظهر لمسة الضغط لعناصر القوائم داخل البطاقة
+    return SizedBox(
       width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
+      child: Material(
         color: AppColors.navySurface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.divider),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: AppColors.divider),
+        ),
+        child: Padding(padding: padding, child: child),
       ),
-      child: child,
     );
   }
 }

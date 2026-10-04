@@ -497,6 +497,9 @@ class SessionPartner {
   final String nationalId;
   final String phone;
   final double equity;
+  final String? partnerClass;
+  final String? guardianName;
+  final String? guardianshipRef;
 
   const SessionPartner({
     required this.id,
@@ -504,6 +507,9 @@ class SessionPartner {
     required this.nationalId,
     required this.phone,
     required this.equity,
+    this.partnerClass,
+    this.guardianName,
+    this.guardianshipRef,
   });
 
   Map<String, dynamic> toJson() => {
@@ -512,6 +518,9 @@ class SessionPartner {
         'nationalId': nationalId,
         'phone': phone,
         'equity': equity,
+        if (partnerClass != null) 'partnerClass': partnerClass,
+        if (guardianName != null) 'guardianName': guardianName,
+        if (guardianshipRef != null) 'guardianshipRef': guardianshipRef,
       };
 
   factory SessionPartner.fromJson(Map<String, dynamic> j) => SessionPartner(
@@ -520,6 +529,9 @@ class SessionPartner {
         nationalId: j['nationalId'] as String? ?? '',
         phone: j['phone'] as String? ?? '',
         equity: (j['equity'] as num).toDouble(),
+        partnerClass: j['partnerClass'] as String?,
+        guardianName: j['guardianName'] as String?,
+        guardianshipRef: j['guardianshipRef'] as String?,
       );
 }
 
@@ -689,6 +701,12 @@ class ContractSession {
   DateTime? archivedAt;
 
   bool get archived => supersededBy != null;
+
+  /// أغراض الشركة (بند جوهري)
+  String purpose;
+
+  /// تعديل يزيد الأعباء المالية على الشركاء: يتطلب الإجماع (القانون اليمني)
+  bool burdenIncrease;
   bool get isAmendment => version > 1;
 
   ContractSession({
@@ -717,6 +735,8 @@ class ContractSession {
     this.disputeRef,
     this.supersededBy,
     this.archivedAt,
+    this.purpose = '',
+    this.burdenIncrease = false,
   })  : witnesses = witnesses ?? [],
         signOffs = signOffs ?? {};
 
@@ -760,6 +780,8 @@ class ContractSession {
         'disputeRef': disputeRef,
         'supersededBy': supersededBy,
         'archivedAt': archivedAt?.toUtc().toIso8601String(),
+        'purpose': purpose,
+        'burdenIncrease': burdenIncrease,
       };
 
   factory ContractSession.fromJson(Map<String, dynamic> j) => ContractSession(
@@ -799,6 +821,8 @@ class ContractSession {
         disputeRef: j['disputeRef'] as String?,
         supersededBy: j['supersededBy'] as String?,
         archivedAt: j['archivedAt'] == null ? null : DateTime.tryParse(j['archivedAt'] as String),
+        purpose: j['purpose'] as String? ?? '',
+        burdenIncrease: j['burdenIncrease'] as bool? ?? false,
       );
 }
 

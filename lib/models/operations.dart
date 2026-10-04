@@ -265,6 +265,9 @@ class ExceptionRequest {
   ExceptionStatus status;
   DateTime? decidedAt;
 
+  /// شركاء أفصحوا عن تعارض مصالح: لا يصوّتون ويُستبعدون من الوزن (القانون اليمني)
+  Set<String> conflicts = {};
+
   ExceptionRequest({
     required this.id,
     required this.companyId,
@@ -299,6 +302,7 @@ class ExceptionRequest {
         'votes': votes.map((k, v) => MapEntry(k, v.toJson())),
         'status': status.name,
         'decidedAt': decidedAt?.toUtc().toIso8601String(),
+        'conflicts': conflicts.toList(),
       };
 
   factory ExceptionRequest.fromJson(Map<String, dynamic> j) => ExceptionRequest(
@@ -319,7 +323,7 @@ class ExceptionRequest {
         ),
         status: ExceptionStatus.values.byName(j['status'] as String),
         decidedAt: j['decidedAt'] == null ? null : DateTime.tryParse(j['decidedAt'] as String),
-      );
+      )..conflicts = (j['conflicts'] as List? ?? []).map((e) => '$e').toSet();
 }
 
 /// حالة المخالفة

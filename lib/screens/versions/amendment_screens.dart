@@ -34,6 +34,7 @@ class _AmendmentProposalScreenState extends State<AmendmentProposalScreen> {
   final Map<String, TextEditingController> _ctrl = {};
   final _reason = TextEditingController();
   String? _error;
+  bool _burden = false;
 
   @override
   void dispose() {
@@ -86,6 +87,18 @@ class _AmendmentProposalScreenState extends State<AmendmentProposalScreen> {
               controller: _reason,
               maxLines: 3,
               decoration: const InputDecoration(labelText: 'سبب التعديل (إلزامي)', alignLabelWithHint: true),
+            ),
+            CheckboxListTile(
+              value: _burden,
+              onChanged: (v) => setState(() => _burden = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              activeColor: AppColors.gold,
+              title: const Text('التعديل يزيد الأعباء المالية على الشركاء', style: TextStyle(fontSize: 13)),
+              subtitle: Text(
+                  _burden
+                      ? 'يتطلب إجماع الشركاء (100%) وفق القانون اليمني'
+                      : 'تعديل العقد قرار جوهري يتطلب موافقة 75% من رأس المال على الأقل',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
@@ -150,7 +163,7 @@ class _AmendmentProposalScreenState extends State<AmendmentProposalScreen> {
     final m = await IdentityService.confirm(context, partnerName: me.name, action: 'تقديم مقترح تعديل العقد');
     if (m == null || !context.mounted) return;
     final s = st.proposeAmendment(base,
-        changes: changes, reason: _reason.text, proposedBy: me.id, disputeRef: widget.disputeRef);
+        changes: changes, reason: _reason.text, proposedBy: me.id, disputeRef: widget.disputeRef, burdenIncrease: _burden);
     final ds = context.read<DisputeState>();
     final d = widget.disputeRef == null ? null : ds.dispute(widget.disputeRef!);
     if (d != null) ds.linkAmendment(cs.current!, d, s.id);

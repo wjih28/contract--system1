@@ -10,6 +10,8 @@ import '../../providers/contract_state.dart';
 import '../../theme/app_theme.dart';
 import '../company/audit_log_screen.dart';
 import 'contract_preview_screen.dart';
+import '../../data/yemen_law.dart';
+import '../company/compliance_screen.dart';
 
 /// P13: العقد النهائي. تمثيل غير قابل للتعديل مع حالة التواقيع والأدلة ومرجع السلامة.
 /// أي تعديل لاحق يتم بإصدار جديد (المرحلة 3)، ولا تظهر هنا أي أداة تعديل.
@@ -36,6 +38,21 @@ class FinalContractScreen extends StatelessWidget {
               StateBanner.readOnly(
                   'إصدار مؤرشف للقراءة فقط · حلّ محله الإصدار ${st.sessions.where((x) => x.id == s.supersededBy).firstOrNull?.version ?? ''}. '
                   'يبقى متاحاً للتدقيق ولا يمكن تعديله.'),
+            if (finalized && !s.archived)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Material(
+                  color: AppColors.warning.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  child: ListTile(
+                    leading: const Icon(Icons.account_balance_rounded, color: AppColors.warning),
+                    title: const Text('التوقيع في المنصة توثيق داخلي', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    subtitle: const Text(kSignatureNotice, style: TextStyle(fontSize: 12, height: 1.6)),
+                    trailing: const Icon(Icons.chevron_left_rounded),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ComplianceScreen())),
+                  ),
+                ),
+              ),
             if (!finalized)
               StateBanner(
                 color: AppColors.warning,

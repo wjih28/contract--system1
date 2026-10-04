@@ -396,6 +396,9 @@ class SuccessionCase {
   String? decisionRef;
   String? deedRef;
   String? amendmentRef;
+
+  /// ممثل واحد عن الورثة لممارسة حقوق التصويت (القانون اليمني)
+  String? representativeId;
   final String createdBy;
   final DateTime createdAt;
   DateTime? effectiveAt;
@@ -413,6 +416,7 @@ class SuccessionCase {
     this.decisionRef,
     this.deedRef,
     this.amendmentRef,
+    this.representativeId,
     required this.createdBy,
     required this.createdAt,
     this.effectiveAt,
@@ -431,6 +435,7 @@ class SuccessionCase {
         'decisionRef': decisionRef,
         'deedRef': deedRef,
         'amendmentRef': amendmentRef,
+        'representativeId': representativeId,
         'createdBy': createdBy,
         'createdAt': _iso(createdAt),
         'effectiveAt': effectiveAt == null ? null : _iso(effectiveAt!),
@@ -449,6 +454,7 @@ class SuccessionCase {
         decisionRef: j['decisionRef'] as String?,
         deedRef: j['deedRef'] as String?,
         amendmentRef: j['amendmentRef'] as String?,
+        representativeId: j['representativeId'] as String?,
         createdBy: j['createdBy'] as String? ?? '',
         createdAt: _t(j['createdAt']),
         effectiveAt: j['effectiveAt'] == null ? null : _t(j['effectiveAt']),

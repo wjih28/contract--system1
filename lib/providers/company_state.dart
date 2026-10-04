@@ -231,6 +231,8 @@ class CompanyState extends ChangeNotifier {
     required AppCurrency currency,
     required double capital,
     required List<CompanyMember> members,
+    String purpose = '',
+    double? yerRate,
   }) {
     final now = DateTime.now();
     final c = Company(
@@ -252,10 +254,16 @@ class CompanyState extends ChangeNotifier {
               if (_isCreator(members[i], i)) CompanyRole.systemAdmin,
             },
             equity: members[i].equity,
+            partnerClass: members[i].partnerClass,
+            yemeni: members[i].yemeni,
+            guardianName: members[i].guardianName,
+            guardianshipRef: members[i].guardianshipRef,
           ),
       ],
       createdAt: now,
       createdBy: myUid,
+      purpose: purpose.trim(),
+      yerRate: yerRate,
     );
     companies.insert(0, c);
     currentId = c.id;
@@ -324,6 +332,26 @@ class CompanyState extends ChangeNotifier {
           result: c.partners.map((m) => '${m.name} ${m.equity.toStringAsFixed(2)}%').join('، '),
           actorType: ActorType.system);
     }
+    notifyListeners();
+    _persist();
+  }
+
+  /// تسجيل خطوة من خطوات الشهر والاستيفاء القانوني بمرجعها (دليل الامتثال)
+  void setCompliance(String companyId, String stepId, {required bool done, String? ref}) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null) return;
+    c.compliance = {
+      ...c.compliance,
+      stepId: {'done': done, 'ref': ref, 'at': DateTime.now().toUtc().toIso8601String()},
+    };
+    _db?.collection('companies').doc(companyId).update({'compliance': c.compliance}).then((_) {},
+        onError: (Object e) => debugPrint('تعذر حفظ خطوة الامتثال: $e'));
+    log(companyId,
+        action: done ? 'استيفاء خطوة قانونية: $stepId' : 'إلغاء استيفاء خطوة: $stepId',
+        objectType: 'compliance',
+        objectId: stepId,
+        result: ref ?? '',
+        evidenceRef: ref);
     notifyListeners();
     _persist();
   }

@@ -441,6 +441,14 @@ class FamilyState extends ChangeNotifier {
     return (eq, missing);
   }
 
+  /// اختيار ممثل واحد عن الورثة لممارسة حقوق التصويت
+  void setRepresentative(Company c, SuccessionCase x, String personId) {
+    x.representativeId = personId;
+    _put(c.id, 'succession', x.id, x.toJson());
+    _log(c.id, 'تعيين ممثل الورثة: ${person(personId)?.name ?? personId}', 'family', x.id, x.currentAuthority);
+    _changed();
+  }
+
   void linkAmendment(Company c, SuccessionCase x, String sessionId) {
     x.amendmentRef = sessionId;
     _put(c.id, 'succession', x.id, x.toJson());

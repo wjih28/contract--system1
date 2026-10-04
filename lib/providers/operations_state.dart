@@ -342,7 +342,19 @@ class OperationsState extends ChangeNotifier {
 
   /// الشركاء المخوّلون بالتصويت على الاستثناء: كل الشركاء عدا مقدّم الطلب
   List<CompanyMember> eligibleVoters(Company c, ExceptionRequest ex) =>
-      c.partners.where((p) => p.id != ex.requestedBy && p.equity > 0).toList();
+      c.partners.where((p) => p.id != ex.requestedBy && p.equity > 0 && !ex.conflicts.contains(p.id)).toList();
+
+  /// إفصاح الشريك عن مصلحة مباشرة أو غير مباشرة: يُستبعد من التصويت ويُسجَّل الإفصاح
+  void declareConflict(Company c, ExceptionRequest ex, CompanyMember member, {required String note}) {
+    if (ex.status != ExceptionStatus.pending || ex.conflicts.contains(member.id)) return;
+    ex.conflicts = {...ex.conflicts, member.id};
+    ex.votes = {...ex.votes}..remove(member.id);
+    _log(c.id, 'إفصاح ${member.name} عن تعارض مصالح في الاستثناء', 'exception', ex.id,
+        note.trim().isEmpty ? 'يُستبعد من التصويت' : note.trim());
+    _decide(c, ex);
+    _put(c.id, 'exceptions', ex.id, ex.toJson());
+    _changed();
+  }
 
   /// نسب الموافقة والرفض مرجّحة بالملكية بين المخوّلين
   (double approve, double reject) shares(Company c, ExceptionRequest ex) {

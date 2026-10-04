@@ -165,7 +165,38 @@ class _ExceptionCard extends StatelessWidget {
               ),
             ),
           ]),
-        ] else if (ex.status == ExceptionStatus.pending && me != null && me.id == ex.requestedBy)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: () async {
+                final t = TextEditingController();
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: AppColors.navySurface,
+                    title: const Text('إفصاح عن تعارض مصالح'),
+                    content: TextField(controller: t, decoration: const InputDecoration(labelText: 'طبيعة المصلحة')),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+                      ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('إفصاح والامتناع')),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  context.read<OperationsState>().declareConflict(context.read<CompanyState>().current!, ex, me, note: t.text);
+                }
+                t.dispose();
+              },
+              icon: const Icon(Icons.front_hand_rounded, size: 18),
+              label: const Text('لي مصلحة في هذه العملية'),
+            ),
+          ),
+        ] else if (ex.conflicts.contains(me?.id))
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('أفصحت عن تعارض مصالح، فلا تصوّت على هذا الطلب.', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          )
+        else if (ex.status == ExceptionStatus.pending && me != null && me.id == ex.requestedBy)
           const Padding(
             padding: EdgeInsets.only(top: 8),
             child: Text('أنت مقدّم الطلب، فلا تصوّت عليه.', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),

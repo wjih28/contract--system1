@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../data/yemen_law.dart';
 import '../../models/questionnaire.dart';
 import '../../providers/app_state.dart';
 import '../../models/company.dart';
@@ -26,6 +27,11 @@ class _PartnerDraft {
   final TextEditingController nationalId;
   final TextEditingController phone;
   final TextEditingController equity;
+  final TextEditingController guardian = TextEditingController();
+  final TextEditingController guardianRef = TextEditingController();
+  PartnerClass partnerClass = PartnerClass.general;
+  bool yemeni = true;
+  bool minor = false;
 
   _PartnerDraft(this.id, {String n = '', String nid = '', String ph = '', String eq = ''})
       : name = TextEditingController(text: n),
@@ -38,20 +44,19 @@ class _PartnerDraft {
     nationalId.dispose();
     phone.dispose();
     equity.dispose();
+    guardian.dispose();
+    guardianRef.dispose();
   }
 }
 
 class _NewSessionScreenState extends State<NewSessionScreen> {
-  static const _types = [
-    'شركة ذات مسؤولية محدودة',
-    'شركة تضامن',
-    'شركة توصية بسيطة',
-  ];
-
   final _formKey = GlobalKey<FormState>();
   final _company = TextEditingController();
+  final _purpose = TextEditingController();
   final _capital = TextEditingController(text: '100000');
-  String _type = _types.first;
+  final _rate = TextEditingController();
+  CompanyFormSpec _form = formSpec(CompanyForm.llc);
+  bool _capitalAck = false;
   AppCurrency _currency = AppCurrency.usd;
   final List<_PartnerDraft> _partners = [];
   int _managing = 0; // الشريك المدير (حسب ترتيبه في الجدول)
@@ -86,7 +91,9 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
   @override
   void dispose() {
     _company.dispose();
+    _purpose.dispose();
     _capital.dispose();
+    _rate.dispose();
     for (final p in _partners) {
       p.dispose();
     }
@@ -104,6 +111,31 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
     }
     if ((_equitySum - 100).abs() > 0.01) {
       _snack('مجموع الحصص يجب أن يساوي 100% (الحالي ${_equitySum.toStringAsFixed(1)}%)');
+      return;
+    }
+    // شروط الشكل القانوني (قانون الشركات التجارية اليمني)
+    bool general(_PartnerDraft p) => !_form.twoClasses || p.partnerClass == PartnerClass.general;
+    final rate = double.tryParse(_rate.text.trim());
+    final violations = formViolations(
+      _form,
+      partners: _partners.length,
+      generalPartners: _partners.where(general).length,
+      limitedPartners: _partners.where((p) => !general(p)).length,
+      nonYemeniGeneral: _form.generalPartnerYemeni ? _partners.where((p) => general(p) && !p.yemeni).length : 0,
+      minorGeneral: _form.generalPartnerYemeni ? _partners.where((p) => general(p) && p.minor).length : 0,
+      capital: double.tryParse(_capital.text.trim()) ?? 0,
+      yerRate: rate,
+    );
+    if (violations.isNotEmpty) {
+      _snack(violations.join('، '));
+      return;
+    }
+    if (_form.minCapitalYer != null && rate == null && !_capitalAck) {
+      _snack('أدخل سعر الصرف المعتمد للتحقق من الحد الأدنى لرأس المال، أو أقرّ بأن رأس المال يستوفيه');
+      return;
+    }
+    if (_partners.any((p) => p.minor && (p.guardian.text.trim().isEmpty || p.guardianRef.text.trim().isEmpty))) {
+      _snack('الشريك القاصر يلزمه اسم الولي أو الوصي ورقم حكم الوصاية');
       return;
     }
     final state = context.read<ContractState>();
@@ -126,9 +158,11 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
     // رحلة التأسيس: إنشاء الشركة بشركائها وحصصها ثم فتح جلسة التأسيس لها
     final company = context.read<CompanyState>().createCompany(
       legalName: _company.text.trim(),
-      companyType: _type,
+      companyType: _form.label,
       currency: _currency,
       capital: double.parse(_capital.text.trim()),
+      purpose: _purpose.text,
+      yerRate: double.tryParse(_rate.text.trim()),
       members: [
         for (var i = 0; i < _partners.length; i++)
           CompanyMember(
@@ -138,6 +172,10 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
             phone: normalizePhone(_partners[i].phone.text),
             equity: double.parse(_partners[i].equity.text.trim()),
             roles: {i == _managing ? CompanyRole.managingPartner : CompanyRole.partner},
+            partnerClass: _form.twoClasses ? _partners[i].partnerClass.name : null,
+            yemeni: _partners[i].yemeni,
+            guardianName: _partners[i].minor ? _partners[i].guardian.text.trim() : null,
+            guardianshipRef: _partners[i].minor ? _partners[i].guardianRef.text.trim() : null,
           ),
       ],
     );
@@ -149,6 +187,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       capital: company.capital,
       partners: company.partners.map((m) => m.toSessionPartner()).toList(),
       settings: company.votingSettings,
+      purpose: company.purpose,
     );
     Navigator.pushReplacement(
       context,
@@ -185,17 +224,31 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _type,
+            DropdownButtonFormField<CompanyForm>(
+              initialValue: _form.form,
+              isExpanded: true,
               dropdownColor: AppColors.navySurface,
               decoration: const InputDecoration(
-                labelText: 'الشكل القانوني',
+                labelText: 'الشكل القانوني (القانون اليمني)',
                 prefixIcon: Icon(Icons.account_balance_rounded),
               ),
-              items: _types
-                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                  .toList(),
-              onChanged: (v) => setState(() => _type = v!),
+              items: [
+                for (final f in kCompanyForms)
+                  DropdownMenuItem(value: f.form, child: Text('${f.label} · ${f.category}')),
+              ],
+              onChanged: (v) => setState(() => _form = formSpec(v!)),
+            ),
+            const SizedBox(height: 10),
+            _FormSpecCard(spec: _form),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _purpose,
+              validator: _required,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'أغراض الشركة (بند جوهري)',
+                prefixIcon: Icon(Icons.flag_rounded),
+              ),
             ),
             const SizedBox(height: 18),
             const Text('عملة العقد',
@@ -233,6 +286,31 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                     double.tryParse(_capital.text) ?? 0, _currency),
               ),
             ),
+            if (_form.minCapitalYer != null) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _rate,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: 'سعر الصرف المعتمد: ريال يمني لكل 1 ${_currency.code}',
+                  prefixIcon: const Icon(Icons.currency_exchange_rounded),
+                  helperText: double.tryParse(_rate.text) == null
+                      ? 'الحد الأدنى لرأس المال ${_form.minCapitalYer!.toStringAsFixed(0)} ريال يمني'
+                      : 'يعادل ${((double.tryParse(_capital.text) ?? 0) * double.parse(_rate.text)).toStringAsFixed(0)} ريالاً يمنياً · الحد الأدنى ${_form.minCapitalYer!.toStringAsFixed(0)}',
+                ),
+              ),
+              if (double.tryParse(_rate.text) == null)
+                CheckboxListTile(
+                  value: _capitalAck,
+                  onChanged: (v) => setState(() => _capitalAck = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppColors.gold,
+                  title: Text('نقرّ بأن رأس المال يعادل ${_form.minCapitalYer!.toStringAsFixed(0)} ريال يمني على الأقل',
+                      style: const TextStyle(fontSize: 12.5)),
+                ),
+            ],
             const SizedBox(height: 26),
             Row(
               children: [
@@ -248,6 +326,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
             ..._partners.asMap().entries.map((e) => _PartnerForm(
                   index: e.key,
                   draft: e.value,
+                  spec: _form,
                   required: _required,
                   onChanged: () => setState(() {}),
                   managing: e.key == _managing,
@@ -300,9 +379,12 @@ class _StepLabel extends StatelessWidget {
                   color: AppColors.navyDark, fontWeight: FontWeight.w900, fontSize: 13)),
         ),
         const SizedBox(width: 10),
-        Text(text,
-            style: const TextStyle(
-                color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+        Flexible(
+          child: Text(text,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
+        ),
       ],
     );
   }
@@ -311,6 +393,7 @@ class _StepLabel extends StatelessWidget {
 class _PartnerForm extends StatelessWidget {
   final int index;
   final _PartnerDraft draft;
+  final CompanyFormSpec spec;
   final String? Function(String?) required;
   final VoidCallback onChanged;
   final VoidCallback? onRemove;
@@ -320,6 +403,7 @@ class _PartnerForm extends StatelessWidget {
   const _PartnerForm({
     required this.index,
     required this.draft,
+    required this.spec,
     required this.required,
     required this.onChanged,
     required this.onRemove,
@@ -344,10 +428,12 @@ class _PartnerForm extends StatelessWidget {
                       style: const TextStyle(color: AppColors.gold, fontSize: 12)),
                 ),
                 const SizedBox(width: 8),
-                Text('الشريك ${index + 1}',
-                    style: const TextStyle(
-                        color: AppColors.textSecondary, fontWeight: FontWeight.w700)),
-                const Spacer(),
+                Expanded(
+                  child: Text('الشريك ${index + 1}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontWeight: FontWeight.w700)),
+                ),
                 ChoiceChip(
                   label: const Text('الشريك المدير'),
                   selected: managing,
@@ -412,9 +498,104 @@ class _PartnerForm extends StatelessWidget {
                 isDense: true,
               ),
             ),
+            if (spec.twoClasses) ...[
+              const SizedBox(height: 8),
+              Wrap(spacing: 6, children: [
+                for (final pc in PartnerClass.values)
+                  ChoiceChip(
+                    label: Text(pc == PartnerClass.limited && spec.form == CompanyForm.partnershipLimitedByShares ? 'شريك مساهم' : pc.label),
+                    selected: draft.partnerClass == pc,
+                    onSelected: (_) {
+                      draft.partnerClass = pc;
+                      onChanged();
+                    },
+                  ),
+              ]),
+            ],
+            Row(children: [
+              if (spec.generalPartnerYemeni)
+                Expanded(
+                  child: CheckboxListTile(
+                    value: draft.yemeni,
+                    onChanged: (v) {
+                      draft.yemeni = v ?? true;
+                      onChanged();
+                    },
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: AppColors.gold,
+                    title: const Text('يمني الجنسية', style: TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+              Expanded(
+                child: CheckboxListTile(
+                  value: draft.minor,
+                  onChanged: (v) {
+                    draft.minor = v ?? false;
+                    onChanged();
+                  },
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: AppColors.gold,
+                  title: const Text('قاصر أو ناقص أهلية', style: TextStyle(fontSize: 12.5)),
+                ),
+              ),
+            ]),
+            if (draft.minor) ...[
+              TextFormField(
+                controller: draft.guardian,
+                decoration: const InputDecoration(labelText: 'اسم الولي الشرعي أو الوصي', isDense: true),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: draft.guardianRef,
+                decoration: const InputDecoration(labelText: 'رقم حكم الوصاية أو الولاية', isDense: true),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('يوقّع الولي أو الوصي المأذون قضائياً عن القاصر وفق القانون المدني اليمني.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// بطاقة شروط الشكل القانوني المختار (من وثائق القانون اليمني)
+class _FormSpecCard extends StatelessWidget {
+  final CompanyFormSpec spec;
+  const _FormSpecCard({required this.spec});
+
+  @override
+  Widget build(BuildContext context) {
+    String n(double v) => v.toStringAsFixed(0).replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+    final lines = <String>[
+      spec.liability,
+      'الشركاء: ${spec.minPartners} على الأقل${spec.maxPartners == null ? '' : ' وحتى ${spec.maxPartners}'}',
+      if (spec.minCapitalYer != null) 'الحد الأدنى لرأس المال: ${n(spec.minCapitalYer!)} ريال يمني',
+      if (spec.minShareValueYer != null) 'أقل قيمة للحصة أو السهم: ${n(spec.minShareValueYer!)} ريال يمني',
+      'الترخيص: ${spec.licensing}',
+      ...spec.notes,
+    ];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: (spec.legalPersonality ? AppColors.info : AppColors.warning).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: (spec.legalPersonality ? AppColors.info : AppColors.warning).withValues(alpha: 0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${spec.label} · ${spec.category}', style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text(spec.definition, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.6)),
+        for (final l in lines) Text('• $l', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.6)),
+        if (!spec.legalPersonality)
+          const Text('تنبيه: لا تتمتع بالشخصية الاعتبارية ولا تُشهر بالسجل التجاري.',
+              style: TextStyle(color: AppColors.warning, fontSize: 12, fontWeight: FontWeight.w700)),
+      ]),
     );
   }
 }

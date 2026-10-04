@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/question_bank.dart';
 import '../models/company.dart' show ActorType;
 import '../models/governance_config.dart';
+import '../data/yemen_law.dart';
 import '../models/questionnaire.dart';
 import '../services/cloud_sync.dart';
 import '../services/phone.dart';
@@ -463,6 +464,8 @@ class ContractState extends ChangeNotifier {
       'changeSummary': s.changeSummary,
       'proposedBy': s.proposedBy,
       'disputeRef': s.disputeRef,
+      'purpose': s.purpose,
+      'burdenIncrease': s.burdenIncrease,
       'supersededBy': null,
       'archivedAt': null,
     };
@@ -539,6 +542,8 @@ class ContractState extends ChangeNotifier {
       disputeRef: d['disputeRef'] as String?,
       supersededBy: d['supersededBy'] as String?,
       archivedAt: d['archivedAt'] == null ? null : remoteTime(d['archivedAt']),
+      purpose: d['purpose'] as String? ?? '',
+      burdenIncrease: d['burdenIncrease'] as bool? ?? false,
     );
 
     // ترتيب البنود كما في بنك الأسئلة، ثم البنود الخاصة بترتيب الشركاء
@@ -733,6 +738,7 @@ class ContractState extends ChangeNotifier {
     required double capital,
     required List<SessionPartner> partners,
     VotingSettings settings = VotingSettings.defaults,
+    String purpose = '',
   }) {
     final records = <ClauseRecord>[];
     for (final q in bank) {
@@ -768,6 +774,7 @@ class ContractState extends ChangeNotifier {
       createdAt: now,
       updatedAt: now,
       settings: settings,
+      purpose: purpose,
     );
     sessions.insert(0, s);
     if (isCloud) {
@@ -805,7 +812,11 @@ class ContractState extends ChangeNotifier {
     final agree = total == 0 ? 0.0 : share(Ballot.agree) / total * 100;
     final disagree = total == 0 ? 0.0 : share(Ballot.disagree) / total * 100;
     final neutral = total == 0 ? 0.0 : share(Ballot.neutral) / total * 100;
-    final required = private ? 100.0 : q.quorum.percent;
+    var required = private ? 100.0 : q.quorum.percent;
+    // القانون اليمني: تعديل العقد قرار جوهري لا يقل عن 75% من رأس المال، وزيادة الأعباء المالية بالإجماع
+    if (s.isAmendment && r.amended && !private) {
+      required = s.burdenIncrease ? 100.0 : (required < kSupermajority ? kSupermajority : required);
+    }
     final complete = list.every((p) => r.votes.containsKey(p.id));
     final deadline = r.openedAt?.add(Duration(days: s.settings.deadlineDays));
     return QuorumResult(
@@ -994,7 +1005,11 @@ class ContractState extends ChangeNotifier {
   }
 
   /// التحييد يتم باتفاق جميع الشركاء ويُسقط البند من العقد
+  /// البند الجوهري (الشكل القانوني، الأغراض، رأس المال، الإدارة) لا يُحيَّد
+  bool canNeutralize(ClauseRecord r) => !kEssentialClauses.contains(r.questionId);
+
   void neutralize(ContractSession s, ClauseRecord r) {
+    if (!canNeutralize(r)) return;
     r.status = ClauseStatus.neutralized;
     r.resolvedAt = DateTime.now();
     _remoteRecord(s, r);
@@ -1051,6 +1066,12 @@ class ContractState extends ChangeNotifier {
   List<String> signingBlockers(ContractSession s, {int minWitnesses = 2}) {
     final out = <String>[];
     final open = s.records.where((r) => r.status.needsDecision).length;
+    // البنود الجوهرية لا تُؤجَّل ولا تُحيَّد في عقد التأسيس المودع للشهر
+    for (final r in s.records.where((r) =>
+        kEssentialClauses.contains(r.questionId) &&
+        (r.status == ClauseStatus.deferred || r.status == ClauseStatus.neutralized))) {
+      out.add('البند الجوهري "${_title(r)}" لا يجوز تأجيله أو تحييده في عقد التأسيس');
+    }
     final deferred = s.count(ClauseStatus.deferred);
     if (open > 0) out.add('$open بنود لم تُحسم بعد');
     if (deferred > 0) out.add('$deferred بنود مؤجلة يجب حسمها أو تحييدها');
@@ -1210,7 +1231,11 @@ class ContractState extends ChangeNotifier {
   /// J03: مقترح تعديل قيم بنود معتمدة. يُنشئ مسودة إصدار جديد؛ البنود المعدّلة فقط تُطرح للتصويت
   /// والباقي يُنقل كما هو. الإصدار الساري يبقى نافذاً حتى يُعتمد الجديد.
   ContractSession proposeAmendment(ContractSession base,
-      {required Map<String, double> changes, required String reason, required String proposedBy, String? disputeRef}) {
+      {required Map<String, double> changes,
+      required String reason,
+      required String proposedBy,
+      String? disputeRef,
+      bool burdenIncrease = false}) {
     final records = base.records.map((r) {
       final c = r.clone();
       final v = changes[r.key];
@@ -1238,9 +1263,10 @@ class ContractState extends ChangeNotifier {
         records: records,
         partners: base.partners,
         type: ChangeType.amendment,
-        summary: 'تعديل: $changed. السبب: ${reason.trim()}',
+        summary: 'تعديل: $changed. السبب: ${reason.trim()}${burdenIncrease ? ' (يزيد الأعباء المالية: بالإجماع)' : ''}',
         proposedBy: proposedBy,
-        disputeRef: disputeRef);
+        disputeRef: disputeRef,
+        burdenIncrease: burdenIncrease);
   }
 
   /// تعديل جدول الحصص نتيجة صلح أو حكم أو تخارج. البنود تُنقل كما هي، ويوقّع أصحاب الحصص الجديدة.
@@ -1282,7 +1308,8 @@ class ContractState extends ChangeNotifier {
       required ChangeType type,
       required String summary,
       required String proposedBy,
-      String? disputeRef}) {
+      String? disputeRef,
+      bool burdenIncrease = false}) {
     final now = DateTime.now();
     final s = ContractSession(
       id: 'S${now.microsecondsSinceEpoch}',
@@ -1302,6 +1329,8 @@ class ContractState extends ChangeNotifier {
       changeSummary: summary,
       proposedBy: proposedBy,
       disputeRef: disputeRef,
+      purpose: base.purpose,
+      burdenIncrease: burdenIncrease,
     );
     sessions.insert(0, s);
     if (isCloud) {
@@ -1437,6 +1466,8 @@ class ContractState extends ChangeNotifier {
         .replaceAll('{value}', formatValue(s, q, r.value))
         .replaceAll('{capital}', formatCurrency(s.capital, s.currency))
         .replaceAll('{currency}', s.currency.label)
+        .replaceAll('{form}', s.companyType)
+        .replaceAll('{purpose}', s.purpose.isEmpty ? 'الأغراض المبينة في طلب الترخيص' : s.purpose)
         .replaceAll('{partner}', partner?.name ?? '');
   }
 

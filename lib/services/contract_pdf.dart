@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../data/yemen_law.dart';
 import '../models/questionnaire.dart';
 import '../providers/contract_state.dart';
 import '../widgets/common_widgets.dart';
@@ -126,11 +127,16 @@ class ContractPdf {
           pw.SizedBox(height: 14),
           _heading('جدول الشركاء'),
           pw.TableHelper.fromTextArray(
-            headers: ['الاسم', 'رقم الهوية', 'الجوال', 'الحصة'],
+            headers: ['الاسم', 'الصفة', 'رقم الهوية', 'الجوال', 'الحصة'],
             data: s.partners
                 // رقم الجوال يُكتب من اليسار لليمين حتى لا ينقلب ترتيب أرقامه
                 .map((p) => [
                       p.name,
+                      // الصفة القانونية: فئة الشريك في التوصية، والولي عن القاصر
+                      [
+                        if (p.partnerClass != null) p.partnerClass == 'limited' ? 'شريك موصٍ' : 'شريك متضامن',
+                        if (p.guardianName != null) 'قاصر يمثله: ${p.guardianName} (${p.guardianshipRef ?? ''})',
+                      ].join(' · ').ifEmpty('شريك'),
                       p.nationalId.isEmpty ? '—' : p.nationalId,
                       pw.Text(p.phone,
                           textDirection: pw.TextDirection.ltr,
@@ -233,6 +239,9 @@ class ContractPdf {
                           'تُحسب البصمة الرقمية (SHA-256) من نصوص البنود المعتمدة والأصوات والتواقيع والشهود لحظة الاعتماد. أي تعديل لاحق على محتوى العقد، ولو حرفاً واحداً، ينتج بصمة مختلفة.',
                           style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 3),
                         ),
+                        pw.SizedBox(height: 6),
+                        pw.Text(kSignatureNotice, style: const pw.TextStyle(fontSize: 8.5, lineSpacing: 2, color: _muted)),
+                        pw.Text(kContractSupremacy, style: const pw.TextStyle(fontSize: 8.5, lineSpacing: 2, color: _muted)),
                         pw.SizedBox(height: 6),
                         pw.Text(
                           state.verifyHash(s)
@@ -341,3 +350,7 @@ class ContractPdf {
       );
 }
 
+
+extension on String {
+  String ifEmpty(String v) => isEmpty ? v : this;
+}

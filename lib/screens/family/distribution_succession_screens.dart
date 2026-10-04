@@ -8,6 +8,7 @@ import '../../design/responsive.dart';
 import '../../design/state_view.dart';
 import '../../models/company.dart';
 import '../../models/family.dart';
+import '../../data/yemen_law.dart';
 import '../../models/questionnaire.dart';
 import '../../providers/company_state.dart';
 import '../../providers/contract_state.dart';
@@ -258,6 +259,17 @@ class _CaseCard extends StatelessWidget {
         trailing: Text(x.status.label, style: const TextStyle(color: AppColors.gold, fontSize: 12, fontWeight: FontWeight.w800)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('صاحب القرار الحالي: ${x.currentAuthority} ← الخلف: ${f.person(x.successorId)?.name ?? ''}', style: const TextStyle(height: 1.7)),
+          // أثر الوفاة حسب الشكل القانوني (القانون اليمني)
+          if (x.event == SuccessionEvent.death)
+            Text('حكم القانون: ${formSpecOf(c.companyType).onDeath}',
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.6)),
+          if (x.event == SuccessionEvent.death)
+            Text(
+              x.representativeId == null
+                  ? 'لم يُعيَّن ممثل للورثة بعد: يمارس الورثة حقوق التصويت عبر ممثل واحد يختارونه.'
+                  : 'ممثل الورثة في التصويت: ${f.person(x.representativeId!)?.name ?? ''}',
+              style: TextStyle(color: x.representativeId == null ? AppColors.warning : AppColors.success, fontSize: 12),
+            ),
           Text('تاريخ الحدث ${_d.format(x.eventDate)}${x.effectiveAt == null ? '' : ' · نافذة من ${_d.format(x.effectiveAt!)}'}',
               style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
           for (final e in x.evidence) Text('• $e', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
@@ -291,6 +303,8 @@ class _CaseCard extends StatelessWidget {
                   onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FamilyDecisionScreen(decisionId: x.decisionRef!))),
                   child: const Text('القرار'),
                 ),
+              if (x.event == SuccessionEvent.death)
+                TextButton(onPressed: () => _representative(context), child: const Text('ممثل الورثة')),
               if (eq != null && eq.$2.isEmpty && x.amendmentRef == null)
                 TextButton(onPressed: () => _transfer(context, eq.$1), child: const Text('إنشاء إصدار جدول الحصص')),
               if (x.amendmentRef != null)
@@ -304,6 +318,22 @@ class _CaseCard extends StatelessWidget {
         ]),
       ),
     );
+  }
+
+  Future<void> _representative(BuildContext context) async {
+    final f = context.read<FamilyState>();
+    final heirs = f.peopleFor(c.id).where((p) => p.alive && p.id != x.subjectId).toList();
+    final id = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navySurface,
+      builder: (ctx) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          const Padding(padding: EdgeInsets.all(16), child: Text('ممثل الورثة في التصويت', style: TextStyle(fontWeight: FontWeight.w800))),
+          for (final p in heirs) ListTile(title: Text(p.name), subtitle: Text(p.relation), onTap: () => Navigator.pop(ctx, p.id)),
+        ]),
+      ),
+    );
+    if (id != null) f.setRepresentative(c, x, id);
   }
 
   Future<void> _evidence(BuildContext context) async {
