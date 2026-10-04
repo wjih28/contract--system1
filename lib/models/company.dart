@@ -112,6 +112,13 @@ enum AppModule {
   integrations,
   // الأطراف المهنية
   professionalTasks,
+  engagement,
+  legalReview,
+  accountingReview,
+  proComments,
+  proArchive,
+  // المراجعات المهنية من جهة الشركة (الشركاء ومسؤول النظام)
+  professionalReviews,
 }
 
 extension AppModuleX on AppModule {
@@ -159,6 +166,12 @@ extension AppModuleX on AppModule {
         AppModule.channels => 'القنوات والقوالب',
         AppModule.integrations => 'التكامل المحاسبي',
         AppModule.professionalTasks => 'مهامي المهنية',
+        AppModule.engagement => 'ملف التكليف',
+        AppModule.legalReview => 'المراجعة القانونية',
+        AppModule.accountingReview => 'المراجعة المحاسبية',
+        AppModule.proComments => 'التعليقات',
+        AppModule.proArchive => 'أرشيف المستندات',
+        AppModule.professionalReviews => 'المراجعات المهنية',
       };
 
   IconData get icon => switch (this) {
@@ -205,10 +218,20 @@ extension AppModuleX on AppModule {
         AppModule.channels => Icons.campaign_rounded,
         AppModule.integrations => Icons.sync_alt_rounded,
         AppModule.professionalTasks => Icons.assignment_rounded,
+        AppModule.engagement => Icons.badge_rounded,
+        AppModule.legalReview => Icons.balance_rounded,
+        AppModule.accountingReview => Icons.calculate_rounded,
+        AppModule.proComments => Icons.forum_rounded,
+        AppModule.proArchive => Icons.inventory_2_rounded,
+        AppModule.professionalReviews => Icons.rate_review_rounded,
       };
 
   /// وحدات مشتركة تظهر في أي بوابة لمن يملك صلاحيتها
-  bool get shared => this == AppModule.profile || this == AppModule.auditLog || this == AppModule.notifications;
+  bool get shared =>
+      this == AppModule.profile ||
+      this == AppModule.auditLog ||
+      this == AppModule.notifications ||
+      this == AppModule.professionalReviews;
 
   Portal get portal => switch (this) {
         AppModule.adminDashboard ||
@@ -241,7 +264,13 @@ extension AppModuleX on AppModule {
         AppModule.opsReports =>
           Portal.operations,
         AppModule.ruleTest || AppModule.expenseLimits || AppModule.channels || AppModule.integrations => Portal.admin,
-        AppModule.professionalTasks => Portal.professional,
+        AppModule.professionalTasks ||
+        AppModule.engagement ||
+        AppModule.legalReview ||
+        AppModule.accountingReview ||
+        AppModule.proComments ||
+        AppModule.proArchive =>
+          Portal.professional,
         _ => Portal.partner,
       };
 }
@@ -267,6 +296,7 @@ class Permissions {
       AppModule.opsAlerts,
       AppModule.opsReports,
       AppModule.partnerReports,
+      AppModule.professionalReviews,
       AppModule.dashboard,
       AppModule.partners,
       AppModule.establishment,
@@ -281,6 +311,7 @@ class Permissions {
     },
     CompanyRole.partner: {
       AppModule.partnerReports,
+      AppModule.professionalReviews,
       AppModule.dashboard,
       AppModule.partners,
       AppModule.establishment,
@@ -294,6 +325,7 @@ class Permissions {
       AppModule.auditLog,
     },
     CompanyRole.systemAdmin: {
+      AppModule.professionalReviews,
       AppModule.adminDashboard,
       AppModule.companies,
       AppModule.users,
@@ -359,8 +391,22 @@ class Permissions {
       AppModule.opsAlerts,
       AppModule.profile,
     },
-    CompanyRole.lawyer: {AppModule.professionalTasks, AppModule.profile},
-    CompanyRole.accountant: {AppModule.professionalTasks, AppModule.profile},
+    CompanyRole.lawyer: {
+      AppModule.professionalTasks,
+      AppModule.engagement,
+      AppModule.legalReview,
+      AppModule.proComments,
+      AppModule.proArchive,
+      AppModule.profile,
+    },
+    CompanyRole.accountant: {
+      AppModule.professionalTasks,
+      AppModule.engagement,
+      AppModule.accountingReview,
+      AppModule.proComments,
+      AppModule.proArchive,
+      AppModule.profile,
+    },
     CompanyRole.witness: {AppModule.professionalTasks, AppModule.profile},
   };
 

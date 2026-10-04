@@ -8,6 +8,8 @@ import 'models/dispute.dart';
 import 'models/operations.dart';
 import 'providers/daily_ops_state.dart';
 import 'providers/dispute_state.dart';
+import 'providers/professional_state.dart';
+import 'models/admin.dart';
 import 'providers/operations_state.dart';
 import 'services/backend.dart';
 import 'theme/app_theme.dart';
@@ -114,6 +116,18 @@ class MithaqApp extends StatelessWidget {
             ..auditSink = ctx.read<CompanyState>().log
             ..load(),
         ),
+        // الأطراف المهنية: التكليف والمراجعات والتعليقات
+        ChangeNotifierProvider(create: (ctx) {
+          final companies = ctx.read<CompanyState>();
+          final ops = ctx.read<OperationsState>();
+          return ProfessionalState()
+            ..auditSink = companies.log
+            ..notifier = ((c, subject, id) =>
+                ops.notifyCompany(c, NotifCategory.approval, 'T-PRO', subject: subject, relatedType: 'professional', relatedId: id))
+            // انتهاء التكليف أو الاعتذار يوقف وصول الطرف المهني دون حذف سجله
+            ..onAccessEnded = ((cid, memberId) => companies.updateStaff(cid, memberId, status: MemberStatus.suspended))
+            ..load();
+        }),
         // الإصدارات والنزاعات: تربط العقد والرقابة المالية بمسار النزاع
         ChangeNotifierProvider(lazy: false, create: (ctx) => _wireDisputes(ctx)),
       ],

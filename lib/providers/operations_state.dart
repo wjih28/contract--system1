@@ -72,6 +72,12 @@ class OperationsState extends ChangeNotifier {
       mandatory: true,
     ),
     MessageTemplate(
+      id: 'T-PRO',
+      event: 'المراجعات المهنية',
+      subject: 'تحديث في المراجعات المهنية لـ{company}',
+      body: '{rule}',
+    ),
+    MessageTemplate(
       id: 'T-AMENDMENT',
       event: 'مقترح تعديل العقد',
       subject: 'مقترح تعديل عقد {company} بانتظار تصويتك',

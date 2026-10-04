@@ -39,6 +39,14 @@ import '../operations/ops_alerts_screen.dart';
 import '../operations/payroll_screen.dart';
 import '../operations/plans_screen.dart';
 import '../reports/reports_screen.dart';
+import '../professional/accounting_review_screen.dart';
+import '../professional/invitation_screen.dart';
+import '../professional/legal_review_screen.dart';
+import '../professional/pro_archive_screen.dart';
+import '../professional/pro_comments_screen.dart';
+import '../professional/pro_dashboard_screen.dart';
+import '../professional/professional_reviews_screen.dart';
+import '../../providers/professional_state.dart';
 import '../../providers/daily_ops_state.dart';
 import '../versions/versions_screen.dart';
 import '../profile_screen.dart';
@@ -85,6 +93,11 @@ class _AppShellState extends State<AppShell> {
       context.read<OperationsState>().watchCompany(companyId);
       context.read<DisputeState>().watchCompany(companyId);
       context.read<DailyOpsState>().watchCompany(companyId);
+      context.read<ProfessionalState>().watchCompany(companyId);
+      final me = context.read<CompanyState>().me;
+      if (me != null && me.staff && me.roles.any((r) => r == CompanyRole.lawyer || r == CompanyRole.accountant)) {
+        context.read<ContractState>().watchCompanySessions(companyId);
+      }
     });
 
     final modules = cs.myModules;
@@ -95,7 +108,9 @@ class _AppShellState extends State<AppShell> {
       );
     }
     final current = modules.contains(_module) ? _module! : modules.first;
-    final page = KeyedSubtree(key: ValueKey('${cs.current?.id}-$current'), child: _pageFor(current));
+    // R01: الطرف المهني لا يصل إلى وحداته قبل قبول دعوته، ولا بعد انتهاء تكليفه
+    final page = KeyedSubtree(
+        key: ValueKey('${cs.current?.id}-$current'), child: ProfessionalGate(child: _pageFor(current)));
     final size = context.screenSize;
 
     void go(AppModule m) => setState(() => _module = m);
@@ -224,7 +239,13 @@ class _AppShellState extends State<AppShell> {
         AppModule.expenseLimits => const ExpenseLimitsScreen(),
         AppModule.channels => const ChannelsScreen(),
         AppModule.integrations => const IntegrationsScreen(),
-        AppModule.professionalTasks => const WitnessTasksScreen(),
+        AppModule.professionalTasks => const ProDashboardScreen(),
+        AppModule.engagement => const EngagementScreen(),
+        AppModule.legalReview => const LegalReviewScreen(),
+        AppModule.accountingReview => const AccountingReviewScreen(),
+        AppModule.proComments => const ProCommentsScreen(),
+        AppModule.proArchive => const ProArchiveScreen(),
+        AppModule.professionalReviews => const ProfessionalReviewsScreen(),
       };
 }
 

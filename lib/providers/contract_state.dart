@@ -330,6 +330,17 @@ class ContractState extends ChangeNotifier {
     _ticker ??= Timer.periodic(const Duration(minutes: 1), (_) => refreshDeadlines());
   }
 
+  String? _watchedCompanySessions;
+
+  /// الطرف المهني (محامٍ أو محاسب) ليس عضواً في الجلسات: يقرأ جلسات الشركة ضمن نطاق تكليفه
+  void watchCompanySessions(String? companyId) {
+    final cloud = _cloud;
+    if (cloud == null || companyId == null || _watchedCompanySessions == companyId) return;
+    _watchedCompanySessions = companyId;
+    _querySubs.add(cloud.companySessions(companyId).listen((q) => _onSessions('company', q),
+        onError: (Object e) => debugPrint('تعذر قراءة جلسات الشركة للمراجعة: $e')));
+  }
+
   Future<void> attachCloud(CloudSync cloud, {required String phone, required String uid}) async {
     await detachCloud();
     _cloud = cloud;
@@ -349,6 +360,7 @@ class ContractState extends ChangeNotifier {
   }
 
   Future<void> detachCloud() async {
+    _watchedCompanySessions = null;
     for (final s in _querySubs) {
       await s.cancel();
     }

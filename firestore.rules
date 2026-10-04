@@ -29,8 +29,21 @@ service cloud.firestore {
       return signedIn() && myPhone() in sessionData(sid).get('witnessPhones', []);
     }
 
+    // الطرف المهني المكلَّف: تكليفه مستند باسم رقم جواله، والقراءة ضمن نطاقه ومدته
+    function proEngagementPath(cid) {
+      return /databases/$(database)/documents/companies/$(cid)/engagements/$(myPhone());
+    }
+
+    function proCanReadContract(cid) {
+      return signedIn() && cid != null && exists(proEngagementPath(cid))
+        && get(proEngagementPath(cid)).data.status == 'active'
+        && request.time.toMillis() < get(proEngagementPath(cid)).data.get('endMillis', 0)
+        && (('contract' in get(proEngagementPath(cid)).data.scope)
+            || ('financialRules' in get(proEngagementPath(cid)).data.scope));
+    }
+
     function canRead(sid) {
-      return isMember(sid) || isWitness(sid);
+      return isMember(sid) || isWitness(sid) || proCanReadContract(sessionData(sid).get('companyId', null));
     }
 
     function isOpen(sid) {
@@ -200,6 +213,48 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // ───────────── الأطراف المهنية (المرحلة 5) ─────────────
+      function isCompanyPartnerOrAdmin(cid) {
+        return signedIn()
+          && (myPhone() in companyData(cid).get('partnerPhones', companyData(cid).memberPhones)
+              || myPhone() in companyData(cid).get('adminPhones', [])
+              || request.auth.uid == companyData(cid).createdBy);
+      }
+
+      // التكليف: ينشئه الشريك أو مسؤول النظام. الطرف المهني يرد على دعوته ويحدّث تواصله فقط.
+      match /engagements/{eid} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyPartnerOrAdmin(cid) && request.resource.data.companyId == cid && eid == request.resource.data.id;
+        allow update: if (isCompanyPartnerOrAdmin(cid)
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.memberId == resource.data.memberId)
+          || (eid == myPhone()
+            && resource.data.status in ['pending', 'active']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt', 'declineReason', 'contact'])
+            && request.resource.data.status in ['active', 'declined']);
+        allow delete: if false;
+      }
+
+      // التعليقات المهنية أدلة: لا تُحذف، والنص الأصلي ثابت، وتُضاف الردود وتتغير الحالة
+      match /reviewComments/{xId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.text == resource.data.text
+          && request.resource.data.authorId == resource.data.authorId
+          && request.resource.data.replies.size() >= resource.data.replies.size();
+        allow delete: if false;
+      }
+
+      // المراجعة يكتبها صاحب التكليف فقط، والمكتملة لا تُعدَّل
+      match /reviews/{rId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid)
+          && request.resource.data.engagementId == myPhone()
+          && (resource == null || resource.data.status != 'completed');
+        allow delete: if false;
+      }
+
       // تذكرة النزاع (المرحلة 3): دائمة لا تُحذف، وأطرافها ومحفزها ثابتة، والمغلقة لا تُعدَّل
       match /disputes/{dId} {
         allow read: if isCompanyMember(cid);
@@ -229,7 +284,8 @@ service cloud.firestore {
     match /sessions/{sid} {
       allow read: if signedIn()
         && (myPhone() in resource.data.memberPhones
-            || myPhone() in resource.data.get('witnessPhones', []));
+            || myPhone() in resource.data.get('witnessPhones', [])
+            || proCanReadContract(resource.data.get('companyId', null)));
 
       allow create: if signedIn()
         && myPhone() in request.resource.data.memberPhones

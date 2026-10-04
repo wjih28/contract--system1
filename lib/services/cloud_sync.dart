@@ -15,6 +15,10 @@ class CloudSync {
   Stream<QuerySnapshot<Map<String, dynamic>>> mySessions(String phone) =>
       _sessions.where('memberPhones', arrayContains: phone).snapshots();
 
+  /// جلسات الشركة للطرف المهني المكلَّف (تسمح بها قواعد الأمان حسب نطاق تكليفه)
+  Stream<QuerySnapshot<Map<String, dynamic>>> companySessions(String companyId) =>
+      _sessions.where('companyId', isEqualTo: companyId).snapshots();
+
   /// الجلسات التي دُعي فيها المستخدم شاهداً
   Stream<QuerySnapshot<Map<String, dynamic>>> witnessSessions(String phone) =>
       _sessions.where('witnessPhones', arrayContains: phone).snapshots();
