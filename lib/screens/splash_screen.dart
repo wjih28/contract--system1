@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../services/backend.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/account_service.dart';
+import 'email_login_screen.dart';
 import 'login_screen.dart';
+import 'shell/app_shell.dart';
+import 'phone_login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,12 +28,28 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 900),
     )..forward();
 
-    Future.delayed(const Duration(milliseconds: 1800), () {
+    Future.delayed(const Duration(milliseconds: 1800), () async {
+      // وضع الخادم: دخول برقم الجوال، ومن سجّل سابقاً يدخل مباشرة
+      Widget next = const LoginScreen();
+      if (Backend.ready) {
+        final user = Backend.user;
+        if (user == null) {
+          next = const PhoneLoginScreen();
+        } else if (user.phoneNumber == null && user.email != null && await AccountService.mustChange(user.email!)) {
+          // لم يغيّر كلمة السر المبدئية بعد: يعود للدخول ثم التغيير الإلزامي
+          await FirebaseAuth.instance.signOut();
+          next = const EmailLoginScreen();
+        } else {
+          if (!mounted) return;
+          await Backend.attach(context, user);
+          next = const AppShell();
+        }
+      }
       if (mounted) {
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
             transitionDuration: const Duration(milliseconds: 500),
-            pageBuilder: (_, __, ___) => const LoginScreen(),
+            pageBuilder: (_, __, ___) => next,
             transitionsBuilder: (_, anim, __, child) =>
                 FadeTransition(opacity: anim, child: child),
           ),

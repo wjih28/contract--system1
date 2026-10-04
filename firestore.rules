@@ -1,0 +1,453 @@
+rules_version = '2';
+
+// قواعد أمان ميثاق:
+// - لا يقرأ الجلسة إلا أعضاؤها (أرقام جوالات الشركاء).
+// - كل شريك يصوّت ويوقّع باسمه فقط، والتحقق عبر رقم الجوال المؤكد بكود SMS.
+// - جدول الشركاء لا يتغير بعد إنشاء الجلسة.
+// - العقد المكتمل يُقفل نهائياً، فلا تتغير بصمته ولا محتواه.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // الدخول برقم الجوال المؤكد (SMS) أو بالبريد وكلمة السر التي أنشأها مدير النظام
+    function signedIn() {
+      return request.auth != null
+        && (request.auth.token.get('phone_number', null) != null || request.auth.token.get('email', null) != null);
+    }
+
+    // مفتاح الهوية في قوائم الوصول: رقم الجوال، أو "email:" + البريد
+    function myPhone() {
+      return request.auth.token.get('phone_number', null) != null
+        ? request.auth.token.phone_number
+        : 'email:' + request.auth.token.email.lower();
+    }
+
+    function sessionData(sid) {
+      return get(/databases/$(database)/documents/sessions/$(sid)).data;
+    }
+
+    function isMember(sid) {
+      return signedIn() && myPhone() in sessionData(sid).memberPhones;
+    }
+
+    // الشاهد المدعو برقم جواله يقرأ الجلسة ليشهد على إصدارها، دون حق التصويت
+    function isWitness(sid) {
+      return signedIn() && myPhone() in sessionData(sid).get('witnessPhones', []);
+    }
+
+    // الطرف المهني المكلَّف: تكليفه مستند باسم رقم جواله، والقراءة ضمن نطاقه ومدته
+    function proEngagementPath(cid) {
+      return /databases/$(database)/documents/companies/$(cid)/engagements/$(myPhone());
+    }
+
+    function proCanReadContract(cid) {
+      return signedIn() && cid != null && exists(proEngagementPath(cid))
+        && get(proEngagementPath(cid)).data.status == 'active'
+        && request.time.toMillis() < get(proEngagementPath(cid)).data.get('endMillis', 0)
+        && (('contract' in get(proEngagementPath(cid)).data.scope)
+            || ('financialRules' in get(proEngagementPath(cid)).data.scope));
+    }
+
+    function canRead(sid) {
+      return isMember(sid) || isWitness(sid) || proCanReadContract(sessionData(sid).get('companyId', null));
+    }
+
+    function isOpen(sid) {
+      return sessionData(sid).status != 'completed';
+    }
+
+    // الشريك صاحب هذا الرقم هو فقط من يكتب باسمه
+    function actsAs(sid, partnerId) {
+      return sessionData(sid).partnerPhones[partnerId] == myPhone()
+        || myPhone() in sessionData(sid).get('partnerKeys', {}).get(partnerId, []);
+    }
+
+    // ───────────── الشركات ─────────────
+    function companyData(cid) {
+      return get(/databases/$(database)/documents/companies/$(cid)).data;
+    }
+
+    function isCompanyMember(cid) {
+      return signedIn() && myPhone() in companyData(cid).memberPhones;
+    }
+
+    match /companies/{cid} {
+      allow read: if signedIn() && myPhone() in resource.data.memberPhones;
+
+      // منشئ الشركة يجب أن يكون أحد أعضائها
+      allow create: if signedIn()
+        && myPhone() in request.resource.data.memberPhones
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // مسؤول النظام: منشئ الشركة أو من يحمل دور مسؤول النظام (يعيّنه المنشئ فقط)
+      function isCompanyAdmin() {
+        return request.auth.uid == resource.data.createdBy
+          || myPhone() in resource.data.get('adminPhones', []);
+      }
+
+      function unchanged(field) {
+        return request.resource.data.get(field, null) == resource.data.get(field, null);
+      }
+
+      // حقول الإدارة (الصلاحيات، نقاط الإفصاح، الإعدادات، معالجة الأحداث) لا يغيّرها إلا مسؤول النظام،
+      // وقائمة المسؤولين لا يغيّرها إلا المنشئ
+      function adminFieldsOk() {
+        return (isCompanyAdmin()
+            || (unchanged('permissions') && unchanged('controlPoints') && unchanged('settings') && unchanged('triage')
+                && unchanged('memberEmails')))
+          // حقوق الشركاء لا يغيّرها مسؤول النظام: صلاحيات دوري الشريك والشريك المدير ثابتة
+          && request.resource.data.get('permissions', {}).get('partner', null) == resource.data.get('permissions', {}).get('partner', null)
+          && request.resource.data.get('permissions', {}).get('managingPartner', null) == resource.data.get('permissions', {}).get('managingPartner', null)
+          && (unchanged('adminPhones') || request.auth.uid == resource.data.createdBy)
+          // شروط الحوكمة (النصاب ومهل الاستثناء والنزاعات) يعدّلها الشركاء وحدهم
+          && (isPartnerOf() || (unchanged('votingSettings') && govUnchanged()));
+      }
+
+      function isPartnerOf() {
+        return myPhone() in resource.data.get('partnerPhones', []);
+      }
+
+      function govKey(k) {
+        return request.resource.data.get('settings', {}).get(k, null) == resource.data.get('settings', {}).get(k, null);
+      }
+
+      function govUnchanged() {
+        return govKey('exception.deadlineDays') && govKey('dispute.negotiationDays')
+          && govKey('dispute.mediationDays') && govKey('dispute.buyOutHours');
+      }
+
+      // ثلاث حالات للتحديث:
+      // 1) تحديث عادي: الشركاء والموظفون وأرقام الوصول ثابتة
+      // 2) اعتماد إصدار عقد أحدث: يتغير جدول الحصص فقط مع نفس عدد الأعضاء
+      // 3) إدارة الموظفين (مسؤول النظام): دعوة أو إيقاف موظفين بلا حصص، والشركاء يبقون أعضاء دائماً
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && request.resource.data.createdBy == resource.data.createdBy
+        && adminFieldsOk()
+        && (
+          // 1) تحديث عادي
+          (request.resource.data.members == resource.data.members
+            && request.resource.data.memberPhones == resource.data.memberPhones
+            && unchanged('staff')
+            && unchanged('partnerPhones'))
+          // 2) إصدار عقد أحدث: يتغير جدول الحصص، وقد ينضم عضو مدعو (وارث) شريكاً، دون إزالة أحد
+          || (request.resource.data.memberPhones == resource.data.memberPhones
+            && request.resource.data.contractVersion > resource.data.get('contractVersion', 0)
+            && request.resource.data.members.size() >= resource.data.members.size()
+            && request.resource.data.get('partnerPhones', []).hasAll(resource.data.get('partnerPhones', [])))
+          // 3) إدارة الموظفين وأفراد العائلة المدعوين (مسؤول النظام)
+          || (isCompanyAdmin()
+            && request.resource.data.members == resource.data.members
+            && request.resource.data.get('partnerPhones', []).hasAll(resource.data.get('partnerPhones', []))
+            && request.resource.data.memberPhones.hasAll(resource.data.get('partnerPhones', resource.data.memberPhones)))
+        );
+
+      allow delete: if false;
+
+      // سجل التدقيق: للإضافة فقط، ولا يُعدَّل ولا يُحذف أبداً
+      match /audit/{eventId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.actorPhone == myPhone()
+          && request.resource.data.companyId == cid
+          && request.resource.data.at == request.time;
+        allow update, delete: if false;
+      }
+
+      // ───────────── الرقابة المالية (المرحلة 2) ─────────────
+      // العملية المالية: بياناتها الأساسية لا تتغير بعد تسجيلها، وتتغير حالتها فقط
+      match /transactions/{txId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.id == txId
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'checks', 'evaluatedAt', 'contractRef', 'notes']);
+        allow delete: if false;
+      }
+
+      // طلب الاستثناء: لا يغيّر الحد الأصلي ولا المبلغ، والقرار بعد صدوره نهائي
+      match /exceptions/{exId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.status == 'pending';
+        allow update: if isCompanyMember(cid)
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['votes', 'status', 'decidedAt']);
+        allow delete: if false;
+      }
+
+      // المخالفة لا تُحذف أبداً؛ تتغير حالة معالجتها فقط
+      match /violations/{vId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status', 'owner', 'correctiveAction', 'evidence', 'history']);
+        allow delete: if false;
+      }
+
+      // موافقة الشريك المباشرة على إتاحة بياناته الشخصية: يكتبها صاحب الرقم فقط، ولا تُعدَّل ولا تُحذف
+      match /consents/{consentId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.phone == myPhone()
+          && myPhone() in companyData(cid).get('partnerPhones', companyData(cid).memberPhones)
+          && consentId == request.resource.data.point + '|' + request.resource.data.role + '|' + myPhone();
+        allow update, delete: if false;
+      }
+
+      // ───────────── التشغيل اليومي (المرحلة 4) ─────────────
+      // قيود الحساب الجاري للإضافة فقط: التصحيح بقيد تسوية جديد لا بتعديل القيد
+      match /ledger/{eId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid && request.resource.data.amount is number;
+        allow update, delete: if false;
+      }
+
+      match /payroll/{bId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid) && request.resource.data.companyId == cid && request.resource.data.period == (resource == null ? request.resource.data.period : resource.data.period);
+        allow delete: if false;
+      }
+
+      match /plans/{pId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow delete: if false;
+      }
+
+      // المراسلة: نصها يُعدَّل في المسودة فقط، وبعد الإصدار تتغير حالتها فقط ولا تُحذف
+      match /letters/{lId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.reference == resource.data.reference
+          && (resource.data.status == 'draft'
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if isCompanyMember(cid) && resource.data.status == 'draft';
+      }
+
+      match /executions/{xId} {
+        allow read, create, update: if isCompanyMember(cid);
+        allow delete: if false;
+      }
+
+      match /alertStates/{aId} {
+        allow read, create, update: if isCompanyMember(cid);
+        allow delete: if false;
+      }
+
+      // ───────────── الحوكمة العائلية (المرحلة 6) ─────────────
+      // مقيدة بالشركاء وأفراد العائلة المدعوين في شركة فعّلت الوحدة، ولا تُحذف سجلاتها
+      function isFamily(cid) {
+        return signedIn()
+          && companyData(cid).get('familyEnabled', false) == true
+          && myPhone() in companyData(cid).get('familyPhones', []);
+      }
+
+      match /constitution/{x} {
+        allow read, create: if isFamily(cid);
+        // الإصدار الساري أو المؤرشف لا يتغير نصه؛ تتغير حالته فقط
+        allow update: if isFamily(cid)
+          && (resource.data.status == 'draft' || resource.data.status == 'pendingApproval'
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if false;
+      }
+
+      match /familyPeople/{x} {
+        allow read, create, update: if isFamily(cid);
+        allow delete: if false;
+      }
+
+      match /deeds/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid) && request.resource.data.shares == resource.data.shares;
+        allow delete: if false;
+      }
+
+      // التوزيع المعتمد لا يُعاد حسابه: المبالغ ثابتة بعد الإنشاء
+      match /distributions/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid)
+          && request.resource.data.allocations == resource.data.allocations
+          && request.resource.data.available == resource.data.available;
+        allow delete: if false;
+      }
+
+      match /succession/{x} {
+        allow read, create, update: if isFamily(cid);
+        allow delete: if false;
+      }
+
+      // القرار العائلي: الأوزان والعتبة ثابتة منذ فتحه، والأصوات تُضاف ولا تُحذف
+      match /familyDecisions/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid)
+          && request.resource.data.weights == resource.data.weights
+          && request.resource.data.threshold == resource.data.threshold
+          && resource.data.status == 'open';
+        allow delete: if false;
+      }
+
+      // ───────────── الأطراف المهنية (المرحلة 5) ─────────────
+      function isCompanyPartnerOrAdmin(cid) {
+        return signedIn()
+          && (myPhone() in companyData(cid).get('partnerPhones', companyData(cid).memberPhones)
+              || myPhone() in companyData(cid).get('adminPhones', [])
+              || request.auth.uid == companyData(cid).createdBy);
+      }
+
+      // التكليف: ينشئه الشريك أو مسؤول النظام. الطرف المهني يرد على دعوته ويحدّث تواصله فقط.
+      match /engagements/{eid} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyPartnerOrAdmin(cid) && request.resource.data.companyId == cid && eid == request.resource.data.id;
+        allow update: if (isCompanyPartnerOrAdmin(cid)
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.memberId == resource.data.memberId)
+          || (eid == myPhone()
+            && resource.data.status in ['pending', 'active']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt', 'declineReason', 'contact'])
+            && request.resource.data.status in ['active', 'declined']);
+        allow delete: if false;
+      }
+
+      // التعليقات المهنية أدلة: لا تُحذف، والنص الأصلي ثابت، وتُضاف الردود وتتغير الحالة
+      match /reviewComments/{xId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.text == resource.data.text
+          && request.resource.data.authorId == resource.data.authorId
+          && request.resource.data.replies.size() >= resource.data.replies.size();
+        allow delete: if false;
+      }
+
+      // المراجعة يكتبها صاحب التكليف فقط، والمكتملة لا تُعدَّل
+      match /reviews/{rId} {
+        allow read: if isCompanyMember(cid);
+        allow create, update: if isCompanyMember(cid)
+          && request.resource.data.engagementId == myPhone()
+          && (resource == null || resource.data.status != 'completed');
+        allow delete: if false;
+      }
+
+      // تذكرة النزاع (المرحلة 3): دائمة لا تُحذف، وأطرافها ومحفزها ثابتة، والمغلقة لا تُعدَّل
+      match /disputes/{dId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid)
+          && request.resource.data.companyId == cid
+          && request.resource.data.stage == 'negotiation';
+        allow update: if isCompanyMember(cid)
+          && resource.data.status != 'closed'
+          && request.resource.data.parties == resource.data.parties
+          && request.resource.data.trigger == resource.data.trigger
+          && request.resource.data.openedAt == resource.data.openedAt
+          && request.resource.data.entries.size() >= resource.data.entries.size();
+        allow delete: if false;
+      }
+
+      // الإشعار: نصه ودليل تسليمه ثابتان، ويتغير فقط وسم القراءة
+      match /notifications/{nId} {
+        allow read: if isCompanyMember(cid);
+        allow create: if isCompanyMember(cid) && request.resource.data.companyId == cid;
+        allow update: if isCompanyMember(cid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+        allow delete: if false;
+      }
+    }
+
+    // ───────────── حسابات الدخول بالبريد ─────────────
+    // ينشئها مدير النظام بكلمة سر مبدئية، ولا يغيّر وسم "يلزم التغيير" إلا صاحب البريد بعد تغيير كلمته
+    match /accounts/{email} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.mustChangePassword == true
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.email == email;
+      allow update: if signedIn()
+        && request.auth.token.get('email', '').lower() == email
+        && request.resource.data.mustChangePassword == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'changedAt']);
+      allow delete: if false;
+    }
+
+    // ───────────── جلسات التأسيس ─────────────
+    match /sessions/{sid} {
+      allow read: if signedIn()
+        && (myPhone() in resource.data.memberPhones
+            || myPhone() in resource.data.get('witnessPhones', [])
+            || proCanReadContract(resource.data.get('companyId', null)));
+
+      allow create: if signedIn()
+        && myPhone() in request.resource.data.memberPhones
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'active'
+        && request.resource.data.contentHash == null;
+
+      // العقد المعتمد مقفل؛ الاستثناء الوحيد أرشفته عند اعتماد إصدار أحدث يحل محله
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && resource.data.status == 'completed'
+        && resource.data.get('supersededBy', null) == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['supersededBy', 'archivedAt', 'updatedAt'])
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.supersededBy));
+
+      allow update: if signedIn()
+        && myPhone() in resource.data.memberPhones
+        && resource.data.status != 'completed'
+        && request.resource.data.partners == resource.data.partners
+        && request.resource.data.partnerPhones == resource.data.partnerPhones
+        && request.resource.data.memberPhones == resource.data.memberPhones
+        && request.resource.data.createdBy == resource.data.createdBy
+        // الاعتماد النهائي يشترط تسجيل بصمة SHA-256 كاملة
+        && (request.resource.data.status != 'completed'
+            || (request.resource.data.contentHash is string
+                && request.resource.data.contentHash.size() == 64));
+
+      // الحذف لمنشئ الجلسة فقط وقبل اعتماد العقد
+      allow delete: if signedIn()
+        && resource.data.createdBy == request.auth.uid
+        && resource.data.status != 'completed';
+
+      match /votes/{voteId} {
+        allow read: if canRead(sid);
+        allow create, update: if isMember(sid)
+          && isOpen(sid)
+          && actsAs(sid, request.resource.data.partnerId)
+          && request.resource.data.phone == myPhone()
+          && voteId == request.resource.data.recordKey + '__' + request.resource.data.partnerId
+          && request.resource.data.ballot in ['agree', 'disagree', 'neutral']
+          && request.resource.data.at == request.time;
+        allow delete: if false;
+      }
+
+      // التوقيع مرتبط بإصدار المسودة؛ إعادة التوقيع مسموحة لصاحبه فقط قبل الاعتماد
+      match /signoffs/{partnerId} {
+        allow read: if canRead(sid);
+        allow create, update: if isMember(sid)
+          && isOpen(sid)
+          && actsAs(sid, partnerId)
+          && request.resource.data.phone == myPhone()
+          && request.resource.data.draftHash is string
+          && request.resource.data.at == request.time;
+        allow delete: if false;
+      }
+
+      // شهادة الشاهد من جواله: المستند باسم رقمه، ولا يكتبها غيره
+      match /attestations/{phone} {
+        allow read: if canRead(sid);
+        allow create, update: if isWitness(sid)
+          && isOpen(sid)
+          && phone == myPhone()
+          && request.resource.data.draftHash is string
+          && request.resource.data.at == request.time;
+        allow delete: if false;
+      }
+    }
+  }
+}
