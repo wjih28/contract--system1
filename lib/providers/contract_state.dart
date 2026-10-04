@@ -314,7 +314,8 @@ class ContractState extends ChangeNotifier {
   bool get isCloud => _cloud != null;
 
   /// هل يستطيع مستخدم هذا الجهاز التصويت أو التوقيع باسم هذا الشريك؟
-  bool canActAs(SessionPartner p) => !isCloud || normalizePhone(p.phone) == myPhone;
+  bool canActAs(SessionPartner p) =>
+      !isCloud || normalizePhone(p.phone) == myPhone || (p.email.isNotEmpty && emailKey(p.email) == myPhone);
 
   /// هل يستطيع مستخدم هذا الجهاز الشهادة باسم هذا الشاهد؟
   bool canAttestAs(Witness w) => !isCloud || (w.phone.isNotEmpty && w.phone == myPhone);
@@ -433,7 +434,12 @@ class ContractState extends ChangeNotifier {
 
   /// تحويل الجلسة إلى مستند Firestore
   Map<String, dynamic> sessionToRemote(ContractSession s, {required String uid}) {
-    final phones = {for (final p in s.partners) p.id: normalizePhone(p.phone)};
+    final phones = {for (final p in s.partners) p.id: p.phone.isEmpty ? emailKey(p.email) : normalizePhone(p.phone)};
+    // مفاتيح هوية كل شريك (الجوال والبريد): قواعد الأمان تسمح له بالتصويت بأي منهما
+    final keys = {
+      for (final p in s.partners)
+        p.id: [if (p.phone.isNotEmpty) normalizePhone(p.phone), if (p.email.isNotEmpty) emailKey(p.email)],
+    };
     final used = s.records.map((r) => r.questionId).toSet();
     return {
       'companyId': s.companyId,
@@ -443,7 +449,8 @@ class ContractState extends ChangeNotifier {
       'capital': s.capital,
       'partners': s.partners.map((p) => {...p.toJson(), 'phone': phones[p.id]}).toList(),
       'partnerPhones': phones,
-      'memberPhones': phones.values.toSet().toList(),
+      'partnerKeys': keys,
+      'memberPhones': keys.values.expand((k) => k).toSet().toList(),
       'records': {for (final r in s.records) r.key: _recordToRemote(r, carried: s.isAmendment && !r.amended)},
       // البنود المضافة يدوياً تُرفق بالجلسة حتى تظهر على أجهزة بقية الشركاء
       'customQuestions': _customQuestions.where((q) => used.contains(q.id)).map((q) => q.toJson()).toList(),

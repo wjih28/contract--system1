@@ -190,6 +190,9 @@ class PlatformSetting {
   /// لا يسري إلا بعد ربط خدمة خارجية (مثل مزوّد الرسائل)
   final bool requiresService;
 
+  /// من شروط الشركاء (مهل الاستثناء والنزاعات): يعدّلها الشركاء وحدهم لا مسؤول النظام
+  final bool partnerGoverned;
+
   const PlatformSetting({
     required this.key,
     required this.label,
@@ -201,6 +204,7 @@ class PlatformSetting {
     this.choices,
     required this.impact,
     this.requiresService = false,
+    this.partnerGoverned = false,
   });
 
   String? validate(Object? v) {
@@ -242,6 +246,7 @@ class PlatformSetting {
       defaultValue: 3,
       min: 1,
       max: 14,
+      partnerGoverned: true,
       impact: 'تسري على طلبات الاستثناء الجديدة فقط.',
     ),
     PlatformSetting(
@@ -252,6 +257,7 @@ class PlatformSetting {
       defaultValue: 14,
       min: 7,
       max: 30,
+      partnerGoverned: true,
       impact: 'تسري على النزاعات الجديدة فقط. مخطط النزاعات يحددها بـ 14 يوماً.',
     ),
     PlatformSetting(
@@ -262,6 +268,7 @@ class PlatformSetting {
       defaultValue: 30,
       min: 15,
       max: 30,
+      partnerGoverned: true,
       impact: 'تسري على النزاعات التي تدخل الوساطة بعد الحفظ. المخطط يحددها بين 15 و30 يوماً.',
     ),
     PlatformSetting(
@@ -272,6 +279,7 @@ class PlatformSetting {
       defaultValue: 72,
       min: 48,
       max: 72,
+      partnerGoverned: true,
       impact: 'تسري على العروض الجديدة فقط. المخطط يحددها بين 48 و72 ساعة.',
     ),
     PlatformSetting(

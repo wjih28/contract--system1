@@ -31,15 +31,24 @@ void main() {
   });
 
   group('الصلاحيات (A04)', () {
-    test('الافتراضي يطابق الأدوار، وحقوق الشريك الأساسية مقفلة لا تُنزع', () {
+    test('الافتراضي يطابق الأدوار، وصلاحيات الشركاء يحددها العقد ولا تُعدَّل من الإدارة', () {
       expect(Permissions.actionsFor(CompanyRole.partner, AppModule.voting, c), contains(PermAction.approve));
+      final before = Permissions.effectiveModules({CompanyRole.partner}, c);
+      final logs = cs.audit.length;
       cs.savePermissions(c.id, CompanyRole.partner, {AppModule.voting: {}, AppModule.transactions: {}});
-      // التصويت مقفل فيبقى، والعمليات تُنزع
+      cs.savePermissions(c.id, CompanyRole.managingPartner, {AppModule.voting: {}});
       expect(Permissions.actionsFor(CompanyRole.partner, AppModule.voting, c),
           containsAll([PermAction.view, PermAction.respond, PermAction.approve]));
-      expect(Permissions.effectiveModules({CompanyRole.partner}, c), isNot(contains(AppModule.transactions)));
-      expect(cs.audit.first.objectType, 'permissions');
-      expect(cs.audit.first.result, contains('العمليات والمخالفات'));
+      expect(Permissions.effectiveModules({CompanyRole.partner}, c), before);
+      expect(c.permissions.containsKey('partner'), isFalse);
+      expect(c.permissions.containsKey('managingPartner'), isFalse);
+      expect(cs.audit.length, logs);
+    });
+
+    test('نقاط الإفصاح لا تُضبط لأدوار الشركاء من الإدارة', () {
+      final p = ControlPoint.catalog.first;
+      cs.saveControlPoint(c.id, p.id, CompanyRole.partner, {});
+      expect(c.controlPoints[p.id]?.containsKey('partner') ?? false, isFalse);
     });
 
     test('إضافة وحدة لدور، ثم استعادة الافتراضي', () {
@@ -121,6 +130,39 @@ void main() {
       expect(ev.map((e) => e.type), containsAll(['تغيير صلاحيات', 'تغيير إعداد']));
       cs.triageEvent(c.id, ev.first.id, TriageState.investigating, assignee: 'المدير');
       expect(Triage.fromJson(c.triage[ev.first.id]!).state, TriageState.investigating);
+    });
+  });
+
+  group('فصل مسؤول النظام عن حقوق الشركاء', () {
+    void actAsStaffAdmin() {
+      expect(cs.inviteStaff(c.id, name: 'مسؤول', phone: '771000009', role: CompanyRole.systemAdmin), isNull);
+      cs.myPhone = '+967771000009';
+      expect(cs.me?.isPartner, isFalse);
+    }
+
+    test('المسؤول من غير الشركاء لا يغيّر النصاب ولا مهل الاستثناء والنزاعات', () {
+      actAsStaffAdmin();
+      expect(cs.canGovern, isFalse);
+      final v = c.votingSettings;
+      cs.updateVotingSettings(c.id, VotingSettings(quorum: 10, deadlineDays: 1, deadlockAfter: 1));
+      expect(c.votingSettings.quorum, v.quorum);
+      expect(cs.setSetting(c.id, 'dispute.negotiationDays', 20), CompanyState.governanceOnly);
+      expect(cs.setSetting(c.id, 'exception.deadlineDays', 5), CompanyState.governanceOnly);
+      // الإعدادات التشغيلية تبقى له
+      expect(cs.setSetting(c.id, 'audit.retentionYears', 12), isNull);
+    });
+
+    test('الشريك يعدّل شروط الحوكمة', () {
+      expect(cs.canGovern, isTrue);
+      cs.updateVotingSettings(c.id, VotingSettings(quorum: 60, deadlineDays: 5, deadlockAfter: 3));
+      expect(c.votingSettings.quorum, 60);
+      expect(cs.setSetting(c.id, 'dispute.negotiationDays', 20), isNull);
+    });
+
+    test('المسؤول من غير الشركاء ليس ناخباً في الشركاء', () {
+      actAsStaffAdmin();
+      expect(c.partners.map((p) => p.id), isNot(contains(cs.me!.id)));
+      expect(c.toJson()['partnerPhones'], isNot(contains('+967771000009')));
     });
   });
 }

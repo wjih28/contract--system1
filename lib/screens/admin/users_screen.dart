@@ -9,6 +9,8 @@ import '../../models/admin.dart';
 import '../../models/company.dart';
 import '../../providers/company_state.dart';
 import '../../theme/app_theme.dart';
+import '../../services/account_service.dart';
+import 'account_dialogs.dart';
 import 'roles_screen.dart';
 
 final _dt = DateFormat('yyyy/MM/dd HH:mm');
@@ -58,7 +60,7 @@ class UsersScreen extends StatelessWidget {
                   'والموقوف يفقد الوصول فوراً مع بقاء سجله.',
             ),
             _section('الشركاء (${c.partners.length})'),
-            for (final m in c.partners) _UserTile(c: c, m: m, editable: false),
+            for (final m in c.partners) _UserTile(c: c, m: m, editable: false, accounts: canEdit),
             const SizedBox(height: 12),
             _section('الموظفون والأطراف المدعوون (${c.staffMembers.length})'),
             if (c.staffMembers.isEmpty)
@@ -67,7 +69,7 @@ class UsersScreen extends StatelessWidget {
                 title: 'لا يوجد موظفون بعد',
                 message: 'ادعُ المدير التنفيذي أو المالي أو المحاسب برقم جواله. يدخل برمز التحقق ويرى وحدات دوره فقط.',
               ),
-            for (final m in c.staffMembers) _UserTile(c: c, m: m, editable: canEdit),
+            for (final m in c.staffMembers) _UserTile(c: c, m: m, editable: canEdit, accounts: canEdit),
           ],
         ),
       ),
@@ -83,6 +85,7 @@ class UsersScreen extends StatelessWidget {
     final cs = context.read<CompanyState>();
     final name = TextEditingController();
     final phone = TextEditingController();
+    final email = TextEditingController();
     var role = CompanyRole.executiveManager;
     String? error;
     await showModalBottomSheet(
@@ -105,6 +108,13 @@ class UsersScreen extends StatelessWidget {
               decoration: const InputDecoration(labelText: 'رقم الجوال', hintText: '77xxxxxxx أو 9665xxxxxxxx'),
             ),
             const SizedBox(height: 10),
+            TextField(
+              controller: email,
+              keyboardType: TextInputType.emailAddress,
+              textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'البريد الإلكتروني (للدخول بكلمة سر مبدئية)'),
+            ),
+            const SizedBox(height: 10),
             DropdownButtonFormField<CompanyRole>(
               initialValue: role,
               isExpanded: true,
@@ -121,9 +131,11 @@ class UsersScreen extends StatelessWidget {
             const SizedBox(height: 14),
             ElevatedButton(
               onPressed: () {
-                final e = cs.inviteStaff(c.id, name: name.text, phone: phone.text, role: role);
+                final e = cs.inviteStaff(c.id, name: name.text, phone: phone.text, role: role, email: email.text);
                 if (e != null) return set(() => error = e);
                 Navigator.pop(ctx);
+                final m = c.staffMembers.lastOrNull;
+                if (m != null && m.email.isNotEmpty) provisionAccounts(context, c, [m]);
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text('أُضيف ${name.text.trim()}. يدخل برقم جواله ورمز التحقق، ويرى وحدات دور ${role.label} فقط.')));
               },
@@ -135,6 +147,7 @@ class UsersScreen extends StatelessWidget {
     );
     name.dispose();
     phone.dispose();
+    email.dispose();
   }
 }
 
@@ -142,7 +155,8 @@ class _UserTile extends StatelessWidget {
   final Company c;
   final CompanyMember m;
   final bool editable;
-  const _UserTile({required this.c, required this.m, required this.editable});
+  final bool accounts;
+  const _UserTile({required this.c, required this.m, required this.editable, this.accounts = false});
 
   @override
   Widget build(BuildContext context) {
@@ -165,13 +179,20 @@ class _UserTile extends StatelessWidget {
         subtitle: Text(
           '${m.roles.map((r) => r.label).join('، ')}'
           '${m.isPartner ? ' · ${m.equity.toStringAsFixed(2)}%' : ''}\n'
-          '${phoneVisible ? m.phone : 'الجوال محجوب حسب نقاط الإفصاح'} · '
+          '${phoneVisible ? (m.phone.isEmpty ? 'بلا جوال' : m.phone) : 'الجوال محجوب حسب نقاط الإفصاح'}'
+          '${c.emailOf(m).isEmpty ? '' : ' · ${c.emailOf(m)}'} · '
           '${seen == null ? 'لم يدخل بعد' : 'آخر دخول ${_dt.format(seen.toLocal())}'}',
           style: const TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.6),
         ),
         isThreeLine: true,
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           StatusBadge(gs, overrideLabel: label, dense: true),
+          if (accounts)
+            IconButton(
+              tooltip: 'حساب الدخول بالبريد',
+              icon: const Icon(Icons.key_rounded, size: 20),
+              onPressed: () => _account(context),
+            ),
           if (editable)
             PopupMenuButton<String>(
               color: AppColors.navySurface,
@@ -196,6 +217,75 @@ class _UserTile extends StatelessWidget {
                     ? const PopupMenuItem(value: 'suspend', child: Text('إيقاف الوصول'))
                     : const PopupMenuItem(value: 'activate', child: Text('إعادة التفعيل')),
               ],
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// حساب الدخول بالبريد: إضافة البريد، وإنشاء الحساب بكلمة سر مبدئية، أو رابط تعيين كلمة السر
+  Future<void> _account(BuildContext context) async {
+    final cs = context.read<CompanyState>();
+    final email = c.emailOf(m);
+    final has = email.isNotEmpty && await AccountService.hasAccount(email);
+    if (!context.mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.navySurface,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text('حساب ${m.name}', style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text(email.isEmpty ? 'لا يوجد بريد' : (has ? '$email · له حساب دخول' : '$email · بلا حساب بعد'),
+                style: const TextStyle(color: AppColors.textMuted)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.alternate_email_rounded),
+            title: Text(email.isEmpty ? 'إضافة بريد للدخول' : 'تغيير البريد'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              final t = TextEditingController(text: email);
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (d) => AlertDialog(
+                  backgroundColor: AppColors.navySurface,
+                  title: Text('بريد ${m.name}'),
+                  content: TextField(controller: t, textDirection: TextDirection.ltr, keyboardType: TextInputType.emailAddress),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('إلغاء')),
+                    ElevatedButton(onPressed: () => Navigator.pop(d, true), child: const Text('حفظ')),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                final err = cs.setMemberEmail(c.id, m.id, t.text);
+                if (err != null && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+              }
+              t.dispose();
+            },
+          ),
+          if (email.isNotEmpty && !has)
+            ListTile(
+              leading: const Icon(Icons.vpn_key_rounded),
+              title: const Text('إنشاء حساب بكلمة سر مبدئية'),
+              onTap: () {
+                Navigator.pop(ctx);
+                provisionAccounts(context, c, [m]);
+              },
+            ),
+          if (has)
+            ListTile(
+              leading: const Icon(Icons.lock_reset_rounded),
+              title: const Text('إعادة تعيين كلمة السر'),
+              subtitle: const Text('يُرسَل رابط التعيين إلى بريد الشريك من Firebase', style: TextStyle(fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final err = await AccountService.sendReset(email);
+                cs.log(c.id, action: 'إعادة تعيين كلمة سر ${m.name}', objectType: 'users', objectId: m.id, result: err ?? 'أُرسل الرابط');
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'أُرسل رابط تعيين كلمة السر إلى $email')));
+                }
+              },
             ),
         ]),
       ),

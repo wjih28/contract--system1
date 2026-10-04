@@ -114,7 +114,11 @@ class ControlPointEditor extends StatelessWidget {
                     Row(children: [
                       Expanded(child: Text(r.label, style: const TextStyle(fontWeight: FontWeight.w800))),
                       Text(
-                        c.controlPoints[p.id]?.containsKey(r.name) ?? false ? 'تجاوز صريح' : 'موروث',
+                        r.isPartner
+                            ? 'يحدده العقد'
+                            : c.controlPoints[p.id]?.containsKey(r.name) ?? false
+                                ? 'تجاوز صريح'
+                                : 'موروث',
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
                       ),
                     ]),
@@ -123,7 +127,7 @@ class ControlPointEditor extends StatelessWidget {
                         FilterChip(
                           label: Text(a.label),
                           selected: configured(r).contains(a),
-                          onSelected: canEdit
+                          onSelected: canEdit && !r.isPartner
                               ? (v) {
                                   final next = {...configured(r)};
                                   v ? next.add(a) : next.remove(a);

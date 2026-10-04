@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../services/backend.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/account_service.dart';
+import 'email_login_screen.dart';
 import 'login_screen.dart';
 import 'shell/app_shell.dart';
 import 'phone_login_screen.dart';
@@ -32,6 +35,10 @@ class _SplashScreenState extends State<SplashScreen>
         final user = Backend.user;
         if (user == null) {
           next = const PhoneLoginScreen();
+        } else if (user.phoneNumber == null && user.email != null && await AccountService.mustChange(user.email!)) {
+          // لم يغيّر كلمة السر المبدئية بعد: يعود للدخول ثم التغيير الإلزامي
+          await FirebaseAuth.instance.signOut();
+          next = const EmailLoginScreen();
         } else {
           if (!mounted) return;
           await Backend.attach(context, user);

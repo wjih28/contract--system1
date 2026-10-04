@@ -39,7 +39,7 @@ class PlatformSettingsScreen extends StatelessWidget {
                   title: Text(cat, style: const TextStyle(fontWeight: FontWeight.w800)),
                   childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                   children: [
-                    for (final s in PlatformSetting.catalog.where((x) => x.category == cat)) _SettingRow(c: c, s: s, canEdit: canEdit),
+                    for (final s in PlatformSetting.catalog.where((x) => x.category == cat)) _SettingRow(c: c, s: s, canEdit: canEdit && (!s.partnerGoverned || cs.canGovern)),
                   ],
                 ),
               ),
@@ -88,7 +88,7 @@ class _SettingRow extends StatelessWidget {
           control,
         ]),
         Text(
-          '${s.impact}${s.min != null ? ' القيم المسموحة: ${s.min}–${s.max}.' : ''}${s.requiresService ? ' (يتطلب خدمة غير مربوطة بعد)' : ''}',
+          '${s.impact}${s.min != null ? ' القيم المسموحة: ${s.min}–${s.max}.' : ''}${s.requiresService ? ' (يتطلب خدمة غير مربوطة بعد)' : ''}${s.partnerGoverned ? ' من شروط الشركاء: يعدّله شريك.' : ''}',
           style: const TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.5),
         ),
         if (history.isNotEmpty)

@@ -11,6 +11,7 @@ import '../../providers/contract_state.dart';
 import '../../services/phone.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../admin/account_dialogs.dart';
 import 'session_overview_screen.dart';
 
 /// تهيئة جلسة تأسيس جديدة: بيانات الشركة والعملة وجدول الشركاء
@@ -27,6 +28,7 @@ class _PartnerDraft {
   final TextEditingController nationalId;
   final TextEditingController phone;
   final TextEditingController equity;
+  final TextEditingController email = TextEditingController();
   final TextEditingController guardian = TextEditingController();
   final TextEditingController guardianRef = TextEditingController();
   PartnerClass partnerClass = PartnerClass.general;
@@ -46,6 +48,7 @@ class _PartnerDraft {
     equity.dispose();
     guardian.dispose();
     guardianRef.dispose();
+    email.dispose();
   }
 }
 
@@ -57,6 +60,9 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
   final _rate = TextEditingController();
   CompanyFormSpec _form = formSpec(CompanyForm.llc);
   bool _capitalAck = false;
+
+  /// إنشاء حسابات دخول بالبريد بكلمات سر مبدئية للشركاء الذين لهم بريد
+  bool _createAccounts = true;
   AppCurrency _currency = AppCurrency.usd;
   final List<_PartnerDraft> _partners = [];
   int _managing = 0; // الشريك المدير (حسب ترتيبه في الجدول)
@@ -103,7 +109,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
   double get _equitySum => _partners.fold(
       0, (a, p) => a + (double.tryParse(p.equity.text.trim()) ?? 0));
 
-  void _start() {
+  Future<void> _start() async {
     if (!_formKey.currentState!.validate()) return;
     if (_partners.length < 2) {
       _snack('يجب أن يكون عدد الشركاء اثنين على الأقل');
@@ -115,7 +121,8 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
     }
     // شروط الشكل القانوني (قانون الشركات التجارية اليمني)
     bool general(_PartnerDraft p) => !_form.twoClasses || p.partnerClass == PartnerClass.general;
-    final rate = double.tryParse(_rate.text.trim());
+    // العقد بالريال اليمني: لا حاجة لسعر صرف
+    final rate = _currency == AppCurrency.yer ? 1.0 : double.tryParse(_rate.text.trim());
     final violations = formViolations(
       _form,
       partners: _partners.length,
@@ -134,6 +141,15 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       _snack('أدخل سعر الصرف المعتمد للتحقق من الحد الأدنى لرأس المال، أو أقرّ بأن رأس المال يستوفيه');
       return;
     }
+    final emails = _partners.map((p) => p.email.text.trim().toLowerCase()).where((e) => e.isNotEmpty).toList();
+    if (emails.any((e) => !isValidEmail(e))) {
+      _snack('بريد إلكتروني غير صحيح لأحد الشركاء');
+      return;
+    }
+    if (emails.toSet().length != emails.length) {
+      _snack('لا يجوز تكرار البريد الإلكتروني لأكثر من شريك');
+      return;
+    }
     if (_partners.any((p) => p.minor && (p.guardian.text.trim().isEmpty || p.guardianRef.text.trim().isEmpty))) {
       _snack('الشريك القاصر يلزمه اسم الولي أو الوصي ورقم حكم الوصاية');
       return;
@@ -142,15 +158,16 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
     final phones = _partners.map((p) => normalizePhone(p.phone.text)).toList();
     if (state.isCloud) {
       // كل شريك يدخل برقم جواله، لذا الرقم إلزامي وغير مكرر، ويجب أن يكون منشئ الجلسة أحدهم
-      if (phones.any((p) => p.length < 10)) {
-        _snack('أدخل رقم جوال صحيح لكل شريك، فكل شريك يصوّت من جواله');
+      // كل شريك يدخل برقم جواله أو ببريده وكلمة سر مبدئية
+      if (_partners.any((p) => normalizePhone(p.phone.text).length < 10 && p.email.text.trim().isEmpty)) {
+        _snack('أدخل لكل شريك رقم جوال صحيحاً أو بريداً إلكترونياً للدخول');
         return;
       }
-      if (phones.toSet().length != phones.length) {
+      if (phones.where((p) => p.length >= 10).toSet().length != phones.where((p) => p.length >= 10).length) {
         _snack('لا يجوز تكرار رقم الجوال لأكثر من شريك');
         return;
       }
-      if (!phones.contains(state.myPhone)) {
+      if (!phones.contains(state.myPhone) && !emails.map(emailKey).contains(state.myPhone)) {
         _snack('يجب أن تكون أحد الشركاء: أضف رقم جوالك ${state.myPhone} في الجدول');
         return;
       }
@@ -162,7 +179,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       currency: _currency,
       capital: double.parse(_capital.text.trim()),
       purpose: _purpose.text,
-      yerRate: double.tryParse(_rate.text.trim()),
+      yerRate: _currency == AppCurrency.yer ? 1.0 : double.tryParse(_rate.text.trim()),
       members: [
         for (var i = 0; i < _partners.length; i++)
           CompanyMember(
@@ -176,6 +193,7 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
             yemeni: _partners[i].yemeni,
             guardianName: _partners[i].minor ? _partners[i].guardian.text.trim() : null,
             guardianshipRef: _partners[i].minor ? _partners[i].guardianRef.text.trim() : null,
+            email: _partners[i].email.text.trim().toLowerCase(),
           ),
       ],
     );
@@ -189,6 +207,11 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
       settings: company.votingSettings,
       purpose: company.purpose,
     );
+    // حسابات الدخول بالبريد: كلمات سر مبدئية يسلّمها مدير النظام (منشئ الشركة)
+    if (_createAccounts && company.partners.any((m) => m.email.isNotEmpty)) {
+      await provisionAccounts(context, company, company.partners.where((m) => m.email.isNotEmpty).toList());
+    }
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => SessionOverviewScreen(sessionId: s.id)),
@@ -286,7 +309,13 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                     double.tryParse(_capital.text) ?? 0, _currency),
               ),
             ),
-            if (_form.minCapitalYer != null) ...[
+            if (_form.minCapitalYer != null && _currency == AppCurrency.yer)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('الحد الأدنى لرأس المال ${_form.minCapitalYer!.toStringAsFixed(0)} ريال يمني',
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              ),
+            if (_form.minCapitalYer != null && _currency != AppCurrency.yer) ...[
               const SizedBox(height: 12),
               TextFormField(
                 controller: _rate,
@@ -338,6 +367,16 @@ class _NewSessionScreenState extends State<NewSessionScreen> {
                             if (_managing >= _partners.length) _managing = 0;
                           }),
                 )),
+            if (_partners.any((p) => p.email.text.trim().isNotEmpty))
+              CheckboxListTile(
+                value: _createAccounts,
+                onChanged: (v) => setState(() => _createAccounts = v ?? true),
+                contentPadding: EdgeInsets.zero,
+                activeColor: AppColors.gold,
+                title: const Text('إنشاء حسابات دخول بالبريد بكلمات سر مبدئية', style: TextStyle(fontSize: 13)),
+                subtitle: const Text('تظهر لك كلمات السر مرة واحدة لتسلّمها للشركاء، ويغيّرها كل شريك عند أول دخول.',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 11.5)),
+              ),
             OutlinedButton.icon(
               onPressed: () => setState(() => _partners.add(
                   _PartnerDraft('p${DateTime.now().microsecondsSinceEpoch}'))),
@@ -495,6 +534,19 @@ class _PartnerForm extends StatelessWidget {
               decoration: const InputDecoration(
                 labelText: 'رقم الجوال (للتبليغ الرسمي SMS)',
                 hintText: '+967 7XX XXX XXX',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextFormField(
+              controller: draft.email,
+              keyboardType: TextInputType.emailAddress,
+              textDirection: TextDirection.ltr,
+              onChanged: (_) => onChanged(),
+              validator: (v) => v == null || v.trim().isEmpty || isValidEmail(v) ? null : 'بريد غير صحيح',
+              decoration: const InputDecoration(
+                labelText: 'البريد الإلكتروني (للدخول بكلمة سر)',
+                hintText: 'name@example.com',
                 isDense: true,
               ),
             ),

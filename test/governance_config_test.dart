@@ -74,6 +74,7 @@ void main() {
   });
 
   test('تبقى عملة واحدة مفعّلة على الأقل', () {
+    st.setCurrency(const CurrencySetting(currency: AppCurrency.yer, enabled: false));
     st.setCurrency(const CurrencySetting(currency: AppCurrency.sar, enabled: false));
     st.setCurrency(const CurrencySetting(currency: AppCurrency.usd, enabled: false));
     expect(st.enabledCurrencies, [AppCurrency.usd]);

@@ -47,6 +47,13 @@ class CompanyState extends ChangeNotifier {
 
   Set<CompanyRole> get myRoles => me?.roles ?? {};
 
+  /// شروط الحوكمة (التصويت والنصاب ومهل الاستثناء والنزاعات) يعدّلها الشركاء وحدهم.
+  /// مسؤول النظام من غير الشركاء يديرها تقنياً ولا يملك تغييرها.
+  bool get canGovern => me?.isPartner ?? false;
+
+  static const governanceOnly = 'هذا من شروط الشركاء: يعدّله شريك، لا مسؤول النظام';
+  static const partnerRoleLocked = 'صلاحيات الشركاء يحددها العقد ولا تُعدَّل من الإدارة';
+
   /// البوابات: حسب الأدوار، وتُضاف بوابة العائلة للشركاء في الشركة العائلية
   List<Portal> get myPortals {
     final ps = Permissions.portalsFor(myRoles).toSet();
@@ -258,6 +265,7 @@ class CompanyState extends ChangeNotifier {
             yemeni: members[i].yemeni,
             guardianName: members[i].guardianName,
             guardianshipRef: members[i].guardianshipRef,
+            email: members[i].email.trim().toLowerCase(),
           ),
       ],
       createdAt: now,
@@ -399,19 +407,49 @@ class CompanyState extends ChangeNotifier {
   }
 
   /// A03: دعوة موظف بلا حصص برقم جواله. الشركاء وحصصهم لا يتغيرون إلا بإصدار عقد.
-  String? inviteStaff(String companyId, {required String name, required String phone, required CompanyRole role}) {
+  String? inviteStaff(String companyId,
+      {required String name, required String phone, required CompanyRole role, String email = ''}) {
     final c = _company(companyId);
     if (c == null) return 'الشركة غير موجودة';
     if (role.isPartner) return 'الشريك يُضاف بإصدار عقد جديد، لا بالدعوة';
-    final p = normalizePhone(phone);
-    if (name.trim().isEmpty || p.length < 9) return 'أدخل الاسم ورقم جوال صحيحاً';
-    if (c.members.any((m) => m.phone == p)) return 'هذا الرقم عضو في الشركة بالفعل';
+    final p = phone.trim().isEmpty ? '' : normalizePhone(phone);
+    final e = email.trim().toLowerCase();
+    if (name.trim().isEmpty || (p.length < 9 && !isValidEmail(e))) return 'أدخل الاسم ورقم جوال صحيحاً أو بريداً إلكترونياً';
+    if (e.isNotEmpty && !isValidEmail(e)) return 'بريد إلكتروني غير صحيح';
+    if (p.isNotEmpty && c.members.any((m) => m.phone == p)) return 'هذا الرقم عضو في الشركة بالفعل';
+    if (e.isNotEmpty && c.members.any((m) => c.emailOf(m) == e)) return 'هذا البريد لعضو في الشركة بالفعل';
     final m = CompanyMember(
-        id: 'U${DateTime.now().microsecondsSinceEpoch}${c.members.length}', name: name.trim(), phone: p, roles: {role}, staff: true);
+        id: 'U${DateTime.now().microsecondsSinceEpoch}${c.members.length}',
+        name: name.trim(),
+        phone: p,
+        roles: {role},
+        staff: true,
+        email: e);
     c.members = [...c.members, m];
     _update(c, _memberFields(c));
     log(companyId, action: 'دعوة مستخدم: ${m.name}', objectType: 'users', objectId: m.id, result: role.label,
-        evidenceRef: 'الجوال $p');
+        evidenceRef: [if (p.isNotEmpty) 'الجوال $p', if (e.isNotEmpty) 'البريد $e'].join(' · '));
+    return null;
+  }
+
+  /// بريد دخول لعضو لاحقاً (مدير النظام): لا يغيّر جدول الحصص، ويُسجَّل في السجل
+  String? setMemberEmail(String companyId, String memberId, String email) {
+    final c = _company(companyId);
+    final m = c?.members.where((x) => x.id == memberId).firstOrNull;
+    final e = email.trim().toLowerCase();
+    if (c == null || m == null) return 'العضو غير موجود';
+    if (!isValidEmail(e)) return 'بريد إلكتروني غير صحيح';
+    if (c.members.any((x) => x.id != memberId && c.emailOf(x) == e)) return 'هذا البريد لعضو آخر';
+    c.memberEmails = {...c.memberEmails, memberId: e};
+    final j = c.toJson();
+    _update(c, {
+      'memberEmails': c.memberEmails,
+      'memberPhones': j['memberPhones'],
+      'partnerPhones': j['partnerPhones'],
+      'adminPhones': j['adminPhones'],
+      'familyPhones': j['familyPhones'],
+    });
+    log(companyId, action: 'إضافة بريد دخول لـ${m.name}', objectType: 'users', objectId: m.id, result: e);
     return null;
   }
 
@@ -440,7 +478,7 @@ class CompanyState extends ChangeNotifier {
   /// A04: حفظ صلاحيات دور. الحقوق المقفلة للشريك تُضاف دائماً ولا تُنزع.
   void savePermissions(String companyId, CompanyRole role, Map<AppModule, Set<PermAction>> next) {
     final c = _company(companyId);
-    if (c == null) return;
+    if (c == null || role.isPartner) return;
     final before = {for (final m in AppModule.values) m: Permissions.actionsFor(role, m, c)};
     final stored = <String, List<String>>{};
     final changes = <String>[];
@@ -467,7 +505,7 @@ class CompanyState extends ChangeNotifier {
   /// استعادة صلاحيات الدور الافتراضية
   void resetPermissions(String companyId, CompanyRole role) {
     final c = _company(companyId);
-    if (c == null || !c.permissions.containsKey(role.name)) return;
+    if (c == null || role.isPartner || !c.permissions.containsKey(role.name)) return;
     c.permissions = {...c.permissions}..remove(role.name);
     _update(c, {'permissions': c.permissions});
     log(companyId, action: 'استعادة الصلاحيات الافتراضية لدور ${role.label}', objectType: 'permissions', objectId: role.name);
@@ -476,7 +514,7 @@ class CompanyState extends ChangeNotifier {
   /// A05: حفظ إجراءات دور على نقطة إفصاح. إتاحة بيانات شخصية لغير الشريك تُرسل طلب موافقة للشركاء.
   void saveControlPoint(String companyId, String pointId, CompanyRole role, Set<PermAction> actions) {
     final c = _company(companyId);
-    if (c == null) return;
+    if (c == null || role.isPartner) return;
     final p = ControlPoint.byId(pointId);
     c.controlPoints = {
       ...c.controlPoints,
@@ -536,6 +574,7 @@ class CompanyState extends ChangeNotifier {
     final c = _company(companyId);
     if (c == null) return 'الشركة غير موجودة';
     final s = PlatformSetting.byKey(key);
+    if (s.partnerGoverned && !canGovern) return governanceOnly;
     final err = s.validate(value);
     if (err != null) return err;
     final v = s.kind == SettingKind.integer ? int.parse('$value') : value;
@@ -584,7 +623,7 @@ class CompanyState extends ChangeNotifier {
   /// A11: تعديل إعدادات التصويت للشركة؛ تسري على الجلسات الجديدة فقط
   void updateVotingSettings(String companyId, VotingSettings v) {
     final c = companies.where((x) => x.id == companyId).firstOrNull;
-    if (c == null) return;
+    if (c == null || !canGovern) return;
     c.votingSettings = v;
     _db?.collection('companies').doc(companyId).update({'votingSettings': v.toJson()}).then(
           (_) {},

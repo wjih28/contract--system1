@@ -569,6 +569,9 @@ class CompanyMember {
   final String? guardianName;
   final String? guardianshipRef;
 
+  /// البريد الإلكتروني: وسيلة دخول بديلة برقم سر مبدئي يسلّمه مدير النظام
+  final String email;
+
   const CompanyMember({
     required this.id,
     required this.name,
@@ -582,6 +585,7 @@ class CompanyMember {
     this.yemeni = true,
     this.guardianName,
     this.guardianshipRef,
+    this.email = '',
   });
 
   /// قاصر أو ناقص أهلية يمثّله وليّه أو وصيّه
@@ -603,6 +607,7 @@ class CompanyMember {
         yemeni: yemeni,
         guardianName: guardianName,
         guardianshipRef: guardianshipRef,
+        email: email,
       );
 
   SessionPartner toSessionPartner() => SessionPartner(
@@ -613,7 +618,8 @@ class CompanyMember {
       equity: equity,
       partnerClass: partnerClass,
       guardianName: guardianName,
-      guardianshipRef: guardianshipRef);
+      guardianshipRef: guardianshipRef,
+      email: email);
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -628,6 +634,7 @@ class CompanyMember {
         if (!yemeni) 'yemeni': false,
         if (guardianName != null) 'guardianName': guardianName,
         if (guardianshipRef != null) 'guardianshipRef': guardianshipRef,
+        if (email.isNotEmpty) 'email': email,
       };
 
   factory CompanyMember.fromJson(Map<String, dynamic> j) => CompanyMember(
@@ -643,7 +650,14 @@ class CompanyMember {
         yemeni: j['yemeni'] as bool? ?? true,
         guardianName: j['guardianName'] as String?,
         guardianshipRef: j['guardianshipRef'] as String?,
+        email: j['email'] as String? ?? '',
       );
+
+  /// مفاتيح هوية العضو: رقم الجوال، ومفتاح البريد إن وُجد
+  List<String> identityKeys([String? emailOverride]) => [
+        if (phone.isNotEmpty) phone,
+        if ((emailOverride ?? email).isNotEmpty) 'email:${(emailOverride ?? email).trim().toLowerCase()}',
+      ];
 }
 
 /// الشركة: الكيان الذي تُبنى حوله الجلسات والعقد والحوكمة
@@ -672,6 +686,13 @@ class Company {
 
   /// خطوات الشهر والاستيفاء القانوني: الخطوة ← {done, ref, at}
   Map<String, Map<String, dynamic>> compliance;
+
+  /// بريد دخول يضيفه مدير النظام لعضو لاحقاً دون المساس بجدول الحصص: العضو ← البريد
+  Map<String, String> memberEmails;
+
+  String emailOf(CompanyMember m) => memberEmails[m.id] ?? m.email;
+
+  List<String> keysOf(CompanyMember m) => m.identityKeys(emailOf(m));
 
   /// تخصيص مصفوفة الصلاحيات: الدور ← الوحدة ← الإجراءات
   Map<String, Map<String, List<String>>> permissions;
@@ -713,7 +734,9 @@ class Company {
     this.purpose = '',
     this.yerRate,
     Map<String, Map<String, dynamic>>? compliance,
+    Map<String, String>? memberEmails,
   })  : compliance = compliance ?? {},
+        memberEmails = memberEmails ?? {},
         permissions = permissions ?? {},
         controlPoints = controlPoints ?? {},
         consents = consents ?? {},
@@ -737,7 +760,7 @@ class Company {
   double get equityTotal => partners.fold(0, (a, m) => a + m.equity);
 
   CompanyMember? memberByPhone(String? phone) =>
-      phone == null ? null : members.where((m) => m.phone == phone && m.active).firstOrNull;
+      phone == null ? null : members.where((m) => m.active && keysOf(m).contains(phone)).firstOrNull;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -750,18 +773,15 @@ class Company {
         'members': members.where((m) => !m.staff).map((m) => m.toJson()).toList(),
         'staff': members.where((m) => m.staff).map((m) => m.toJson()).toList(),
         // الموقوف يفقد الوصول للقراءة فوراً
-        'memberPhones': members.where((m) => m.active).map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
-        'partnerPhones': members.where((m) => !m.staff).map((m) => m.phone).where((p) => p.isNotEmpty).toSet().toList(),
+        // قوائم الوصول تضم رقم الجوال ومفتاح البريد لكل عضو
+        'memberPhones': members.where((m) => m.active).expand(keysOf).toSet().toList(),
+        'partnerPhones': members.where((m) => !m.staff).expand(keysOf).toSet().toList(),
+        'memberEmails': memberEmails,
         'permissions': permissions,
         'controlPoints': controlPoints,
         'consents': consents,
         // مسؤولو النظام: يضبطون الصلاحيات والإعدادات ويدعون الموظفين (تتحقق منها قواعد الأمان)
-        'adminPhones': members
-            .where((m) => m.active && m.roles.contains(CompanyRole.systemAdmin))
-            .map((m) => m.phone)
-            .where((p) => p.isNotEmpty)
-            .toSet()
-            .toList(),
+        'adminPhones': members.where((m) => m.active && m.roles.contains(CompanyRole.systemAdmin)).expand(keysOf).toSet().toList(),
         'settings': settings,
         'triage': triage,
         'lastSeen': lastSeen,
@@ -773,8 +793,7 @@ class Company {
         'familyPhones': familyEnabled
             ? members
                 .where((m) => m.active && (m.isPartner || m.roles.contains(CompanyRole.familyMember)))
-                .map((m) => m.phone)
-                .where((p) => p.isNotEmpty)
+                .expand(keysOf)
                 .toSet()
                 .toList()
             : <String>[],
@@ -811,6 +830,7 @@ class Company {
         familyEnabled: j['familyEnabled'] as bool? ?? false,
         purpose: j['purpose'] as String? ?? '',
         yerRate: (j['yerRate'] as num?)?.toDouble(),
+        memberEmails: Map<String, dynamic>.from(j['memberEmails'] as Map? ?? {}).map((k, v) => MapEntry(k, '$v')),
         compliance: Map<String, dynamic>.from(j['compliance'] as Map? ?? {})
             .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map))),
       );

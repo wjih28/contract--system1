@@ -15,6 +15,7 @@ import '../providers/professional_state.dart';
 import '../providers/family_state.dart';
 import '../providers/operations_state.dart';
 import 'cloud_sync.dart';
+import 'phone.dart';
 
 /// تهيئة Firebase وربط الحالة بالمستخدم المسجل.
 /// إذا لم يُهيأ Firebase بعد يعمل التطبيق في الوضع المحلي على جهاز واحد.
@@ -40,7 +41,8 @@ class Backend {
 
   /// بعد الدخول برقم الجوال: ربط الجلسات بالخادم وتسجيل المستخدم في التطبيق
   static Future<void> attach(BuildContext context, User user) async {
-    final phone = user.phoneNumber ?? '';
+    // الهوية: رقم الجوال المؤكد، أو مفتاح البريد لمن يدخل بالبريد وكلمة السر
+    final phone = user.phoneNumber ?? (user.email == null ? '' : emailKey(user.email!));
     context.read<AppState>().login(Partner(
           id: user.uid,
           fullName: 'شريك $phone',

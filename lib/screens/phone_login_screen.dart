@@ -7,6 +7,7 @@ import '../services/backend.dart';
 import '../services/phone.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'email_login_screen.dart';
 import 'shell/app_shell.dart';
 
 /// الدخول برقم الجوال وكود SMS: رقم الجوال هو هوية الشريك في التصويت والتوقيع
@@ -195,6 +196,13 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
                         }),
                 child: const Text('تغيير الرقم'),
               ),
+            const SizedBox(height: 16),
+            // الشريك الذي أنشأ له مدير النظام حساباً بالبريد وكلمة سر مبدئية
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmailLoginScreen())),
+              icon: const Icon(Icons.alternate_email_rounded),
+              label: const Text('الدخول بالبريد الإلكتروني'),
+            ),
           ],
         ),
       ),

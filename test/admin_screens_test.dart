@@ -13,6 +13,8 @@ import 'package:mithaq_app/screens/admin/companies_screen.dart';
 import 'package:mithaq_app/screens/admin/control_points_screen.dart';
 import 'package:mithaq_app/screens/admin/platform_settings_screen.dart';
 import 'package:mithaq_app/screens/admin/roles_screen.dart';
+import 'package:mithaq_app/screens/admin/voting_settings_screen.dart';
+import 'package:mithaq_app/screens/email_login_screen.dart';
 import 'package:mithaq_app/screens/admin/security_monitor_screen.dart';
 import 'package:mithaq_app/screens/admin/users_screen.dart';
 import 'package:mithaq_app/screens/company/consent_requests_screen.dart';
@@ -82,6 +84,9 @@ void main() {
     'A20 الأمان والتكامل': () => const SecurityMonitorScreen(),
     'A21 إعدادات المنصة': () => const PlatformSettingsScreen(),
     'موافقة الشريك': () => const ConsentRequestsScreen(),
+    'التصويت والنصاب': () => const VotingSettingsScreen(),
+    'الدخول بالبريد': () => const EmailLoginScreen(),
+    'تغيير كلمة السر أول دخول': () => const ChangePasswordScreen(email: 'a@mail.com', firstLogin: true),
   };
   for (final (w, label) in [(const Size(1200, 2600), 'الحاسب'), (const Size(390, 2600), 'الجوال')]) {
     for (final e in screens.entries) {

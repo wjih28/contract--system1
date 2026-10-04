@@ -8,12 +8,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // الدخول برقم الجوال المؤكد (SMS) أو بالبريد وكلمة السر التي أنشأها مدير النظام
     function signedIn() {
-      return request.auth != null && request.auth.token.phone_number != null;
+      return request.auth != null
+        && (request.auth.token.get('phone_number', null) != null || request.auth.token.get('email', null) != null);
     }
 
+    // مفتاح الهوية في قوائم الوصول: رقم الجوال، أو "email:" + البريد
     function myPhone() {
-      return request.auth.token.phone_number;
+      return request.auth.token.get('phone_number', null) != null
+        ? request.auth.token.phone_number
+        : 'email:' + request.auth.token.email.lower();
     }
 
     function sessionData(sid) {
@@ -52,7 +57,8 @@ service cloud.firestore {
 
     // الشريك صاحب هذا الرقم هو فقط من يكتب باسمه
     function actsAs(sid, partnerId) {
-      return sessionData(sid).partnerPhones[partnerId] == myPhone();
+      return sessionData(sid).partnerPhones[partnerId] == myPhone()
+        || myPhone() in sessionData(sid).get('partnerKeys', {}).get(partnerId, []);
     }
 
     // ───────────── الشركات ─────────────
@@ -86,8 +92,27 @@ service cloud.firestore {
       // وقائمة المسؤولين لا يغيّرها إلا المنشئ
       function adminFieldsOk() {
         return (isCompanyAdmin()
-            || (unchanged('permissions') && unchanged('controlPoints') && unchanged('settings') && unchanged('triage')))
-          && (unchanged('adminPhones') || request.auth.uid == resource.data.createdBy);
+            || (unchanged('permissions') && unchanged('controlPoints') && unchanged('settings') && unchanged('triage')
+                && unchanged('memberEmails')))
+          // حقوق الشركاء لا يغيّرها مسؤول النظام: صلاحيات دوري الشريك والشريك المدير ثابتة
+          && request.resource.data.get('permissions', {}).get('partner', null) == resource.data.get('permissions', {}).get('partner', null)
+          && request.resource.data.get('permissions', {}).get('managingPartner', null) == resource.data.get('permissions', {}).get('managingPartner', null)
+          && (unchanged('adminPhones') || request.auth.uid == resource.data.createdBy)
+          // شروط الحوكمة (النصاب ومهل الاستثناء والنزاعات) يعدّلها الشركاء وحدهم
+          && (isPartnerOf() || (unchanged('votingSettings') && govUnchanged()));
+      }
+
+      function isPartnerOf() {
+        return myPhone() in resource.data.get('partnerPhones', []);
+      }
+
+      function govKey(k) {
+        return request.resource.data.get('settings', {}).get(k, null) == resource.data.get('settings', {}).get(k, null);
+      }
+
+      function govUnchanged() {
+        return govKey('exception.deadlineDays') && govKey('dispute.negotiationDays')
+          && govKey('dispute.mediationDays') && govKey('dispute.buyOutHours');
       }
 
       // ثلاث حالات للتحديث:
@@ -112,7 +137,7 @@ service cloud.firestore {
           // 3) إدارة الموظفين وأفراد العائلة المدعوين (مسؤول النظام)
           || (isCompanyAdmin()
             && request.resource.data.members == resource.data.members
-            && unchanged('partnerPhones')
+            && request.resource.data.get('partnerPhones', []).hasAll(resource.data.get('partnerPhones', []))
             && request.resource.data.memberPhones.hasAll(resource.data.get('partnerPhones', resource.data.memberPhones)))
         );
 
@@ -334,6 +359,21 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
         allow delete: if false;
       }
+    }
+
+    // ───────────── حسابات الدخول بالبريد ─────────────
+    // ينشئها مدير النظام بكلمة سر مبدئية، ولا يغيّر وسم "يلزم التغيير" إلا صاحب البريد بعد تغيير كلمته
+    match /accounts/{email} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.mustChangePassword == true
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.email == email;
+      allow update: if signedIn()
+        && request.auth.token.get('email', '').lower() == email
+        && request.resource.data.mustChangePassword == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'changedAt']);
+      allow delete: if false;
     }
 
     // ───────────── جلسات التأسيس ─────────────

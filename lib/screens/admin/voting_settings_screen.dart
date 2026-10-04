@@ -32,7 +32,8 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
     final quorum = _quorum ?? v.quorum;
     final days = _days ?? v.deadlineDays;
     final deadlock = _deadlock ?? v.deadlockAfter;
-    final changed = quorum != v.quorum || days != v.deadlineDays || deadlock != v.deadlockAfter;
+    final canGovern = cs.canGovern;
+    final changed = canGovern && quorum != v.quorum || days != v.deadlineDays || deadlock != v.deadlockAfter;
 
     final partners = c.partners;
     final total = partners.fold<double>(0, (a, p) => a + p.equity);
@@ -56,6 +57,12 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
               text: 'التصويت مرجّح بنسبة الملكية، وعدم التصويت ليس موافقة. '
                   'التعديل يسري على جلسات التأسيس الجديدة فقط.',
             ),
+            if (!canGovern)
+              const StateBanner(
+                color: AppColors.warning,
+                icon: Icons.gavel_rounded,
+                text: 'النصاب والمهل من شروط الشركاء: يعدّلها شريك من بوابته، ومسؤول النظام يطّلع عليها فقط.',
+              ),
             _Field(
               title: 'الحد الأدنى للمشاركة (النصاب)',
               hint: 'نسبة الحصص التي يجب أن تصوّت حتى يُعتد بالقرار بعد انتهاء المهلة',
@@ -66,7 +73,7 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
                 max: 100,
                 divisions: 100,
                 label: pct(quorum),
-                onChanged: (x) => setState(() => _quorum = x.roundToDouble()),
+                onChanged: !canGovern ? null : (x) => setState(() => _quorum = x.roundToDouble()),
               ),
             ),
             _Field(
@@ -79,7 +86,7 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
                 max: 30,
                 divisions: 29,
                 label: '$days',
-                onChanged: (x) => setState(() => _days = x.round()),
+                onChanged: !canGovern ? null : (x) => setState(() => _days = x.round()),
               ),
             ),
             _Field(
@@ -92,7 +99,7 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
                 max: 5,
                 divisions: 4,
                 label: '$deadlock',
-                onChanged: (x) => setState(() => _deadlock = x.round()),
+                onChanged: !canGovern ? null : (x) => setState(() => _deadlock = x.round()),
               ),
             ),
             const SizedBox(height: 4),
@@ -116,13 +123,10 @@ class _VotingSettingsScreenState extends State<VotingSettingsScreen> {
             const Text('حاسبة المعاينة بحصص الشركاء الفعلية',
                 style: TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
-            Row(children: [
+            Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
               const Text('العتبة: ', style: TextStyle(color: AppColors.textSecondary)),
               for (final t in const [50.01, 66.67, 75.0, 100.0])
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(end: 6),
-                  child: ChoiceChip(label: Text(pct(t)), selected: _threshold == t, onSelected: (_) => setState(() => _threshold = t)),
-                ),
+                ChoiceChip(label: Text(pct(t)), selected: _threshold == t, onSelected: (_) => setState(() => _threshold = t)),
             ]),
             const SizedBox(height: 10),
             ...partners.map((p) => Padding(

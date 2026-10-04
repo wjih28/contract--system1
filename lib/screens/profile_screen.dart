@@ -13,6 +13,7 @@ import '../providers/company_state.dart';
 import '../services/backend.dart';
 import '../theme/app_theme.dart';
 import 'company/consent_requests_screen.dart';
+import 'email_login_screen.dart';
 import 'login_screen.dart';
 import 'operations/notifications_center_screen.dart';
 import 'phone_login_screen.dart';
@@ -68,8 +69,10 @@ class ProfileScreen extends StatelessWidget {
               icon: Icons.verified_user_rounded,
               child: Column(children: [
                 _row(Icons.phone_iphone_rounded, 'الجوال', me?.phone.isNotEmpty == true ? me!.phone : '—',
-                    Backend.user != null ? 'مؤكد برمز SMS' : 'وضع تجريبي محلي'),
-                _row(Icons.alternate_email_rounded, 'البريد الإلكتروني', 'غير مضاف', 'يُضاف عند ربط مزوّد البريد'),
+                    Backend.user?.phoneNumber != null ? 'مؤكد برمز SMS' : Backend.user != null ? '' : 'وضع تجريبي محلي'),
+                _row(Icons.alternate_email_rounded, 'البريد الإلكتروني',
+                    me != null && c != null && c.emailOf(me).isNotEmpty ? c.emailOf(me) : 'غير مضاف',
+                    me != null && c != null && c.emailOf(me).isNotEmpty ? 'للدخول بكلمة السر' : 'يضيفه مسؤول النظام لتفعيل الدخول بالبريد'),
                 FutureBuilder<bool>(
                   future: _biometric(),
                   builder: (_, s) => _row(Icons.fingerprint_rounded, 'تأكيد الإجراءات الحساسة',
@@ -95,6 +98,14 @@ class ProfileScreen extends StatelessWidget {
               child: AuditTimeline(events: events),
             ),
             const SizedBox(height: 12),
+            if (cs.myPhone?.startsWith('email:') ?? false)
+              ListTile(
+                leading: const Icon(Icons.lock_reset_rounded, color: AppColors.gold),
+                title: const Text('تغيير كلمة السر'),
+                trailing: const Icon(Icons.chevron_left_rounded),
+                onTap: () => Navigator.push(
+                    context, MaterialPageRoute(builder: (_) => ChangePasswordScreen(email: cs.myPhone!.substring(6)))),
+              ),
             ListTile(
               leading: const Icon(Icons.tune_rounded, color: AppColors.gold),
               title: const Text('تفضيلات الإشعار'),

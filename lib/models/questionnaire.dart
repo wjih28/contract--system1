@@ -1,23 +1,26 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 
-/// العملات المدعومة في السوق المستهدف (اليمن)
-enum AppCurrency { usd, sar }
+/// العملات المدعومة في السوق المستهدف (اليمن): الدولار أولاً، ثم الريال السعودي، ثم الريال اليمني
+enum AppCurrency { usd, sar, yer }
 
 extension AppCurrencyX on AppCurrency {
   String get label => switch (this) {
         AppCurrency.usd => 'دولار أمريكي',
         AppCurrency.sar => 'ريال سعودي',
+        AppCurrency.yer => 'ريال يمني',
       };
 
   String get code => switch (this) {
         AppCurrency.usd => 'USD',
         AppCurrency.sar => 'SAR',
+        AppCurrency.yer => 'YER',
       };
 
   String get symbol => switch (this) {
         AppCurrency.usd => '\$',
         AppCurrency.sar => 'ر.س',
+        AppCurrency.yer => 'ر.ي',
       };
 }
 
@@ -500,6 +503,7 @@ class SessionPartner {
   final String? partnerClass;
   final String? guardianName;
   final String? guardianshipRef;
+  final String email;
 
   const SessionPartner({
     required this.id,
@@ -510,11 +514,13 @@ class SessionPartner {
     this.partnerClass,
     this.guardianName,
     this.guardianshipRef,
+    this.email = '',
   });
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        if (email.isNotEmpty) 'email': email,
         'nationalId': nationalId,
         'phone': phone,
         'equity': equity,
@@ -532,6 +538,7 @@ class SessionPartner {
         partnerClass: j['partnerClass'] as String?,
         guardianName: j['guardianName'] as String?,
         guardianshipRef: j['guardianshipRef'] as String?,
+        email: j['email'] as String? ?? '',
       );
 }
 

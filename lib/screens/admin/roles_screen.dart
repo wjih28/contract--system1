@@ -34,7 +34,8 @@ class _RolesScreenState extends State<RolesScreen> {
     final cs = context.watch<CompanyState>();
     final c = cs.current;
     if (c == null) return const StateView.empty(title: 'لا توجد شركة', message: '');
-    final canEdit = cs.canDo(AppModule.roles, PermAction.configure);
+    // صلاحيات دوري الشريك والشريك المدير يحددها العقد: عرض فقط
+    final canEdit = cs.canDo(AppModule.roles, PermAction.configure) && !_role.isPartner;
     final saved = _current(c);
     final draft = _draft ?? saved;
     final dirty = _draft != null && AppModule.values.any((m) => !_same(_draft![m]!, saved[m]!));
@@ -83,6 +84,12 @@ class _RolesScreenState extends State<RolesScreen> {
                   ),
               ]),
             ),
+            if (_role.isPartner)
+              const StateBanner(
+                color: AppColors.warning,
+                icon: Icons.gavel_rounded,
+                text: CompanyState.partnerRoleLocked,
+              ),
             const SizedBox(height: 6),
             Row(children: [
               Expanded(

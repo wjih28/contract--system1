@@ -4,6 +4,8 @@ import '../models/models.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../services/account_service.dart';
+import 'email_login_screen.dart';
 import 'shell/app_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,8 +16,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailCtrl = TextEditingController(text: 'khaled@mithaq-ye.com');
-  final _passCtrl = TextEditingController(text: '••••••••');
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  String? _error;
   bool _loading = false;
   bool _obscure = true;
 
@@ -26,20 +29,28 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  /// الدخول بالبريد وكلمة السر التي أنشأها مدير النظام (الوضع المحلي)
   void _login() async {
-    setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 900));
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final (err, mustChange) = await AccountService.signIn(_emailCtrl.text, _passCtrl.text);
     if (!mounted) return;
-    final appState = context.read<AppState>();
-    appState.login(appState.partners.first);
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 450),
-        pageBuilder: (_, __, ___) => const AppShell(),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-      ),
-    );
+    if (err != null) {
+      setState(() {
+        _loading = false;
+        _error = err;
+      });
+      return;
+    }
+    context.read<AppState>().login(context.read<AppState>().partners.first);
+    if (mustChange) {
+      await Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => ChangePasswordScreen(email: _emailCtrl.text.trim().toLowerCase(), current: _passCtrl.text, firstLogin: true)));
+      return;
+    }
+    await enterApp(context, _emailCtrl.text);
   }
 
   @override
@@ -124,25 +135,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+                ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Icon(
-                    Icons.verified_user_rounded,
-                    size: 15,
-                    color: AppColors.gold.withValues(alpha: 0.8),
-                  ),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text(
-                      'محمي بمصادقة ثنائية (2FA) وتشفير من طرف لطرف',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ),
-                ],
+              const Text(
+                'يُنشئ مدير النظام حسابك بكلمة سر مبدئية، وتغيّرها عند أول دخول.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11.5),
               ),
               const SizedBox(height: 28),
               ElevatedButton(
@@ -157,12 +158,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       )
                     : const Text('تسجيل الدخول'),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _loading ? null : _login,
-                icon: const Icon(Icons.fingerprint_rounded),
-                label: const Text('الدخول ببصمة الجهاز'),
               ),
               const SizedBox(height: 24),
               const Divider(),
