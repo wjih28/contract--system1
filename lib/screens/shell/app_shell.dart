@@ -71,8 +71,8 @@ import '../operations/violations_screen.dart';
 
 /// هيكل التطبيق الموحد للبوابات الأربع:
 /// - شريط علوي: الشركة الحالية، البوابة، الإشعارات، الحساب
-/// - قائمة تُظهر الوحدات المسموحة للدور فقط
-/// - جوال: شريط سفلي، لوحي: شريط جانبي مختصر، حاسب: قائمة جانبية كاملة
+/// - قائمة هامبرغر تجمع كل واجهات البوابة المسموحة للدور، وتبديل البوابة، والشركات
+/// - جوال ولوحي: القائمة منزلقة من زر الهامبرغر، حاسب: القائمة نفسها مثبتة ويطويها الزر
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -82,6 +82,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   AppModule? _module;
+  bool _menuOpen = true;
 
   @override
   Widget build(BuildContext context) {
@@ -123,83 +124,33 @@ class _AppShellState extends State<AppShell> {
 
     void go(AppModule m) => setState(() => _module = m);
 
-    if (size == ScreenSize.phone) {
-      // الجوال: أول أربع وحدات في الشريط السفلي والباقي تحت "المزيد"
-      final primary = modules.take(4).toList();
-      final rest = modules.skip(4).toList();
-      final idx = primary.indexOf(current);
+    final desktop = size == ScreenSize.desktop;
+    final menu = _NavMenu(modules: modules, current: current, onSelect: go, pinned: desktop);
+
+    // الجوال واللوحي: كل واجهات البوابة في قائمة الهامبرغر
+    if (!desktop) {
       return Scaffold(
         appBar: const _TopBar(),
-        body: page,
-        bottomNavigationBar: NavigationBar(
+        drawer: Drawer(
+          width: MediaQuery.sizeOf(context).width * 0.86 > 320 ? 320 : MediaQuery.sizeOf(context).width * 0.86,
           backgroundColor: AppColors.navyMedium,
-          indicatorColor: AppColors.gold.withValues(alpha: 0.2),
-          selectedIndex: idx < 0 ? primary.length : idx,
-          onDestinationSelected: (i) {
-            if (i < primary.length) {
-              go(primary[i]);
-            } else {
-              _showMore(context, rest, current, go);
-            }
-          },
-          destinations: [
-            for (final m in primary) NavigationDestination(icon: Icon(m.icon), label: m.label),
-            if (rest.isNotEmpty)
-              const NavigationDestination(icon: Icon(Icons.more_horiz_rounded), label: 'المزيد'),
-          ],
+          child: menu,
         ),
+        body: page,
       );
     }
 
+    // الحاسب: القائمة نفسها مثبتة بجانب المحتوى، وزر الهامبرغر يطويها ويفتحها
     return Scaffold(
-      appBar: const _TopBar(),
+      appBar: _TopBar(onMenu: () => setState(() => _menuOpen = !_menuOpen)),
       body: Row(
         children: [
-          NavigationRail(
-            backgroundColor: AppColors.navyMedium,
-            extended: size == ScreenSize.desktop,
-            minExtendedWidth: 230,
-            selectedIndex: modules.indexOf(current),
-            onDestinationSelected: (i) => go(modules[i]),
-            indicatorColor: AppColors.gold.withValues(alpha: 0.2),
-            selectedIconTheme: const IconThemeData(color: AppColors.gold),
-            unselectedIconTheme: const IconThemeData(color: AppColors.textMuted),
-            selectedLabelTextStyle: const TextStyle(color: AppColors.gold, fontWeight: FontWeight.w800),
-            unselectedLabelTextStyle: const TextStyle(color: AppColors.textSecondary),
-            labelType: size == ScreenSize.desktop ? NavigationRailLabelType.none : NavigationRailLabelType.all,
-            destinations: [
-              for (final m in modules) NavigationRailDestination(icon: Icon(m.icon), label: Text(m.label)),
-            ],
-          ),
-          const VerticalDivider(width: 1),
+          if (_menuOpen) ...[
+            SizedBox(width: 280, child: Material(color: AppColors.navyMedium, child: menu)),
+            const VerticalDivider(width: 1),
+          ],
           Expanded(child: page),
         ],
-      ),
-    );
-  }
-
-  void _showMore(BuildContext context, List<AppModule> rest, AppModule current, void Function(AppModule) go) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.navySurface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            for (final m in rest)
-              ListTile(
-                leading: Icon(m.icon, color: m == current ? AppColors.gold : AppColors.textSecondary),
-                title: Text(m.label),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  go(m);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
       ),
     );
   }
@@ -266,7 +217,9 @@ class _AppShellState extends State<AppShell> {
 
 /// الشريط العلوي: الشركة الحالية، البوابة، الإشعارات، الحساب
 class _TopBar extends StatelessWidget implements PreferredSizeWidget {
-  const _TopBar();
+  /// في الحاسب: طي القائمة المثبتة وفتحها. في الجوال واللوحي يظهر زر القائمة تلقائياً.
+  final VoidCallback? onMenu;
+  const _TopBar({this.onMenu});
 
   @override
   Size get preferredSize => const Size.fromHeight(60);
@@ -275,9 +228,9 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final cs = context.watch<CompanyState>();
     final c = cs.current;
-    final portals = cs.myPortals;
     return AppBar(
       toolbarHeight: 60,
+      leading: onMenu == null ? null : IconButton(tooltip: 'القائمة', icon: const Icon(Icons.menu_rounded), onPressed: onMenu),
       centerTitle: false,
       titleSpacing: 12,
       title: PopupMenuButton<String>(
@@ -331,7 +284,7 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(c?.legalName ?? 'ميثاق',
+                  Text((c?.legalName.isNotEmpty ?? false) ? c!.legalName : 'ميثاق',
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
                   Text(
@@ -345,20 +298,7 @@ class _TopBar extends StatelessWidget implements PreferredSizeWidget {
           ],
         ),
       ),
-      actions: [
-        if (portals.length > 1)
-          PopupMenuButton<Portal>(
-            tooltip: 'تبديل البوابة',
-            icon: Icon(cs.portal.icon),
-            color: AppColors.navySurface,
-            onSelected: (p) => cs.portal = p,
-            itemBuilder: (_) => [
-              for (final p in portals)
-                PopupMenuItem(value: p, child: Row(children: [Icon(p.icon, size: 18), const SizedBox(width: 8), Text(p.label)])),
-            ],
-          ),
-        const SizedBox(width: 6),
-      ],
+      actions: const [SizedBox(width: 6)],
     );
   }
 }
@@ -379,6 +319,134 @@ class _NoCompany extends StatelessWidget {
           actionLabel: 'تأسيس شركة جديدة',
           onAction: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSessionScreen())),
         ),
+      ),
+    );
+  }
+}
+
+/// قائمة الهامبرغر الموحدة لكل البوابات: رأس بالشركة والمستخدم، ثم تبديل البوابة،
+/// ثم واجهات البوابة الحالية، ثم الواجهات العامة، ثم الشركات.
+class _NavMenu extends StatelessWidget {
+  final List<AppModule> modules;
+  final AppModule current;
+  final void Function(AppModule) onSelect;
+  final bool pinned;
+  const _NavMenu({required this.modules, required this.current, required this.onSelect, required this.pinned});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.watch<CompanyState>();
+    final c = cs.current;
+    final me = cs.me;
+    final portals = cs.myPortals;
+    final own = modules.where((m) => m.portal == cs.portal && !m.shared).toList();
+    final general = modules.where((m) => !own.contains(m)).toList();
+
+    void close() {
+      if (!pinned) Navigator.of(context).maybePop();
+    }
+
+    void open(AppModule m) {
+      close();
+      onSelect(m);
+    }
+
+    Widget section(String title) => Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(20, 16, 20, 6),
+          child: Text(title,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: .3)),
+        );
+
+    Widget item(AppModule m) {
+      final selected = m == current;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
+        child: ListTile(
+          dense: true,
+          selected: selected,
+          selectedTileColor: AppColors.gold.withValues(alpha: 0.14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          leading: Icon(m.icon, size: 21, color: selected ? AppColors.gold : AppColors.textSecondary),
+          title: Text(m.label,
+              style: TextStyle(
+                  fontSize: 14,
+                  color: selected ? AppColors.gold : AppColors.textPrimary,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
+          onTap: () => open(m),
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 16),
+        children: [
+          // رأس القائمة: الشركة والمستخدم ودوره
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.divider))),
+            child: Row(children: [
+              const MithaqLogo(size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text((c?.legalName.isNotEmpty ?? false) ? c!.legalName : 'ميثاق',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w800)),
+                  if (me != null)
+                    Text('${me.name} · ${me.roles.map((r) => r.label).join('، ')}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                ]),
+              ),
+            ]),
+          ),
+          // تبديل البوابة: كل بوابات المستخدم من القائمة نفسها
+          if (portals.length > 1) ...[
+            section('البوابات'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final p in portals)
+                  ChoiceChip(
+                    avatar: Icon(p.icon, size: 16, color: p == cs.portal ? AppColors.gold : AppColors.textMuted),
+                    label: Text(p.label, style: const TextStyle(fontSize: 12.5)),
+                    selected: p == cs.portal,
+                    onSelected: (_) => cs.portal = p,
+                  ),
+              ]),
+            ),
+          ],
+          section(cs.portal.label),
+          for (final m in own) item(m),
+          if (general.isNotEmpty) ...[
+            section('عام'),
+            for (final m in general) item(m),
+          ],
+          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1)),
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 26),
+            leading: const Icon(Icons.apartment_rounded, size: 21, color: AppColors.textSecondary),
+            title: const Text('كل شركاتي', style: TextStyle(fontSize: 14)),
+            onTap: () {
+              close();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const MyCompaniesScreen()));
+            },
+          ),
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 26),
+            leading: const Icon(Icons.add_business_rounded, size: 21, color: AppColors.gold),
+            title: const Text('تأسيس شركة جديدة', style: TextStyle(fontSize: 14)),
+            onTap: () {
+              close();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSessionScreen()));
+            },
+          ),
+        ],
       ),
     );
   }
