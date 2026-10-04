@@ -47,7 +47,16 @@ class CompanyState extends ChangeNotifier {
 
   Set<CompanyRole> get myRoles => me?.roles ?? {};
 
-  List<Portal> get myPortals => Permissions.portalsFor(myRoles);
+  /// البوابات: حسب الأدوار، وتُضاف بوابة العائلة للشركاء في الشركة العائلية
+  List<Portal> get myPortals {
+    final ps = Permissions.portalsFor(myRoles).toSet();
+    if (current?.familyEnabled ?? false) {
+      if (myRoles.any((r) => r.isPartner)) ps.add(Portal.family);
+    } else {
+      ps.remove(Portal.family);
+    }
+    return Portal.values.where(ps.contains).toList();
+  }
 
   Portal get portal {
     final ps = myPortals;
@@ -62,7 +71,8 @@ class CompanyState extends ChangeNotifier {
 
   /// الوحدات الظاهرة في القائمة: حسب الدور والبوابة الحالية
   List<AppModule> get myModules {
-    final allowed = Permissions.effectiveModules(myRoles, current);
+    final allowed = Permissions.effectiveModules(myRoles, current)
+      ..removeWhere((m) => kFamilyModules.contains(m) && !(current?.familyEnabled ?? false));
     // وحدات البوابة أولاً ثم الوحدات المشتركة (الإشعارات، السجل، الحساب)
     final list = AppModule.values.where((m) => allowed.contains(m) && (m.portal == portal || m.shared)).toList();
     return [...list.where((m) => m.portal == portal && !m.shared), ...list.where((m) => !(m.portal == portal && !m.shared))];
@@ -283,12 +293,28 @@ class CompanyState extends ChangeNotifier {
     if (c.status == CompanyStatus.establishment) c.status = CompanyStatus.active;
     final changed = equity != null && c.members.any((m) => equity.containsKey(m.id) && equity[m.id] != m.equity);
     if (changed) {
-      c.members = [for (final m in c.members) m.copyWith(equity: equity[m.id] ?? m.equity)];
+      c.members = [
+        for (final m in c.members)
+          // فرد مدعو (وارث) صار له حصة بإصدار معتمد: يصبح شريكاً في جدول الحصص
+          if (m.staff && (equity[m.id] ?? 0) > 0)
+            CompanyMember(
+              id: m.id,
+              name: m.name,
+              phone: m.phone,
+              nationalId: m.nationalId,
+              roles: {...m.roles, CompanyRole.partner},
+              equity: equity[m.id]!,
+            )
+          else
+            m.copyWith(equity: equity[m.id] ?? m.equity),
+      ];
     }
     _db?.collection('companies').doc(companyId).update({
       'contractVersion': version,
       'status': c.status.name,
       if (changed) 'members': c.members.where((m) => !m.staff).map((m) => m.toJson()).toList(),
+      if (changed) 'staff': c.members.where((m) => m.staff).map((m) => m.toJson()).toList(),
+      if (changed) 'partnerPhones': c.toJson()['partnerPhones'],
     }).then((_) {}, onError: (Object e) => debugPrint('تعذر تحديث إصدار العقد: $e'));
     if (changed) {
       log(companyId,
@@ -298,6 +324,21 @@ class CompanyState extends ChangeNotifier {
           result: c.partners.map((m) => '${m.name} ${m.equity.toStringAsFixed(2)}%').join('، '),
           actorType: ActorType.system);
     }
+    notifyListeners();
+    _persist();
+  }
+
+  /// تفعيل الحوكمة العائلية أو إيقافها: قرار الشركاء، ويُسجَّل في السجل
+  void setFamilyEnabled(String companyId, bool v) {
+    final c = companies.where((x) => x.id == companyId).firstOrNull;
+    if (c == null || c.familyEnabled == v) return;
+    c.familyEnabled = v;
+    _db?.collection('companies').doc(companyId).update({'familyEnabled': v, 'familyPhones': c.toJson()['familyPhones']}).then(
+          (_) {},
+          onError: (Object e) => debugPrint('تعذر تفعيل الحوكمة العائلية: $e'),
+        );
+    log(companyId, action: v ? 'تفعيل الحوكمة العائلية' : 'إيقاف الحوكمة العائلية', objectType: 'family', objectId: companyId,
+        result: v ? 'شركة عائلية: الدستور والورثة والتوزيع والخلافة' : '');
     notifyListeners();
     _persist();
   }
@@ -338,7 +379,7 @@ class CompanyState extends ChangeNotifier {
     if (name.trim().isEmpty || p.length < 9) return 'أدخل الاسم ورقم جوال صحيحاً';
     if (c.members.any((m) => m.phone == p)) return 'هذا الرقم عضو في الشركة بالفعل';
     final m = CompanyMember(
-        id: 'U${DateTime.now().microsecondsSinceEpoch}', name: name.trim(), phone: p, roles: {role}, staff: true);
+        id: 'U${DateTime.now().microsecondsSinceEpoch}${c.members.length}', name: name.trim(), phone: p, roles: {role}, staff: true);
     c.members = [...c.members, m];
     _update(c, _memberFields(c));
     log(companyId, action: 'دعوة مستخدم: ${m.name}', objectType: 'users', objectId: m.id, result: role.label,
@@ -365,7 +406,7 @@ class CompanyState extends ChangeNotifier {
 
   Map<String, Object?> _memberFields(Company c) {
     final j = c.toJson();
-    return {'staff': j['staff'], 'memberPhones': j['memberPhones'], 'adminPhones': j['adminPhones']};
+    return {'staff': j['staff'], 'memberPhones': j['memberPhones'], 'adminPhones': j['adminPhones'], 'familyPhones': j['familyPhones']};
   }
 
   /// A04: حفظ صلاحيات دور. الحقوق المقفلة للشريك تُضاف دائماً ولا تُنزع.

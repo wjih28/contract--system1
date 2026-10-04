@@ -375,6 +375,8 @@ class DisputeState extends ChangeNotifier {
       _ => now().add(const Duration(days: 3650)),
     };
     d.status = next.index >= DisputeStage.arbitration.index ? DisputeStatus.escalated : DisputeStatus.adrActive;
+    // الشركة العائلية: الوساطة تُحال إلى مجلس العائلة المنصوص عليه في الدستور العائلي
+    if (next == DisputeStage.mediation && c.familyEnabled && d.mediator == null) d.mediator = 'مجلس العائلة';
     d.entries.add(_sys(d, 'انتقال من ${from.label} إلى ${next.label} ($why).'));
     _log(c.id, 'انتقال النزاع إلى ${next.label}', d.id, why, actor: ActorType.system);
     notifier?.call(c, d, 'انتقل النزاع إلى ${next.label}',

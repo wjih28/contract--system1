@@ -39,6 +39,12 @@ import '../operations/ops_alerts_screen.dart';
 import '../operations/payroll_screen.dart';
 import '../operations/plans_screen.dart';
 import '../reports/reports_screen.dart';
+import '../family/constitution_screen.dart';
+import '../family/distribution_succession_screens.dart';
+import '../family/family_dashboard_screen.dart';
+import '../family/family_decisions_screen.dart';
+import '../family/family_tree_screen.dart';
+import '../../providers/family_state.dart';
 import '../professional/accounting_review_screen.dart';
 import '../professional/invitation_screen.dart';
 import '../professional/legal_review_screen.dart';
@@ -94,6 +100,7 @@ class _AppShellState extends State<AppShell> {
       context.read<DisputeState>().watchCompany(companyId);
       context.read<DailyOpsState>().watchCompany(companyId);
       context.read<ProfessionalState>().watchCompany(companyId);
+      context.read<FamilyState>().watchCompany(companyId);
       final me = context.read<CompanyState>().me;
       if (me != null && me.staff && me.roles.any((r) => r == CompanyRole.lawyer || r == CompanyRole.accountant)) {
         context.read<ContractState>().watchCompanySessions(companyId);
@@ -246,6 +253,12 @@ class _AppShellState extends State<AppShell> {
         AppModule.proComments => const ProCommentsScreen(),
         AppModule.proArchive => const ProArchiveScreen(),
         AppModule.professionalReviews => const ProfessionalReviewsScreen(),
+        AppModule.familyDashboard => const FamilyDashboardScreen(),
+        AppModule.familyConstitution => const ConstitutionScreen(),
+        AppModule.familyTree => const FamilyTreeScreen(),
+        AppModule.familyDistribution => const DistributionScreen(),
+        AppModule.familySuccession => const SuccessionScreen(),
+        AppModule.familyDecisions => const FamilyDecisionsScreen(),
       };
 }
 

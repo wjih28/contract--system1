@@ -1245,20 +1245,27 @@ class ContractState extends ChangeNotifier {
 
   /// تعديل جدول الحصص نتيجة صلح أو حكم أو تخارج. البنود تُنقل كما هي، ويوقّع أصحاب الحصص الجديدة.
   ContractSession proposeCapTable(ContractSession base,
-      {required Map<String, double> equity, required String reason, required String proposedBy, String? disputeRef}) {
-    final partners = base.partners
-        .map((p) => SessionPartner(
-            id: p.id, name: p.name, nationalId: p.nationalId, phone: p.phone, equity: equity[p.id] ?? p.equity))
-        .toList();
+      {required Map<String, double> equity,
+      required String reason,
+      required String proposedBy,
+      String? disputeRef,
+      List<SessionPartner> newPartners = const []}) {
+    // الخلافة: الورثة الأعضاء في الشركة يدخلون جدول الحصص كشركاء جدد بإصدار يوقّعونه
+    final partners = [
+      ...base.partners.map((p) => SessionPartner(
+          id: p.id, name: p.name, nationalId: p.nationalId, phone: p.phone, equity: equity[p.id] ?? p.equity)),
+      for (final n in newPartners)
+        if (!base.partners.any((p) => p.id == n.id)) n,
+    ];
     final records = base.records
         .map((r) => r.clone()
           ..amended = false
           ..previousValue = null)
         .toList();
-    final diff = base.partners
-        .where((p) => (equity[p.id] ?? p.equity) != p.equity)
+    final diff = partners
+        .where((p) => (base.partners.where((x) => x.id == p.id).firstOrNull?.equity ?? 0) != p.equity)
         .map((p) =>
-            '${p.name} من ${p.equity.toStringAsFixed(2)}% إلى ${(equity[p.id] ?? p.equity).toStringAsFixed(2)}%')
+            '${p.name} من ${(base.partners.where((x) => x.id == p.id).firstOrNull?.equity ?? 0).toStringAsFixed(2)}% إلى ${p.equity.toStringAsFixed(2)}%')
         .join('، ');
     return _newVersion(base,
         records: records,

@@ -9,6 +9,7 @@ import 'models/operations.dart';
 import 'providers/daily_ops_state.dart';
 import 'providers/dispute_state.dart';
 import 'providers/professional_state.dart';
+import 'providers/family_state.dart';
 import 'models/admin.dart';
 import 'providers/operations_state.dart';
 import 'services/backend.dart';
@@ -126,6 +127,15 @@ class MithaqApp extends StatelessWidget {
                 ops.notifyCompany(c, NotifCategory.approval, 'T-PRO', subject: subject, relatedType: 'professional', relatedId: id))
             // انتهاء التكليف أو الاعتذار يوقف وصول الطرف المهني دون حذف سجله
             ..onAccessEnded = ((cid, memberId) => companies.updateStaff(cid, memberId, status: MemberStatus.suspended))
+            ..load();
+        }),
+        // الحوكمة العائلية: الدستور والورثة والتوزيع والخلافة والقرارات العائلية
+        ChangeNotifierProvider(create: (ctx) {
+          final ops = ctx.read<OperationsState>();
+          return FamilyState()
+            ..auditSink = ctx.read<CompanyState>().log
+            ..notifier = ((c, subject, id) =>
+                ops.notifyCompany(c, NotifCategory.approval, 'T-PRO', subject: subject, relatedType: 'family', relatedId: id))
             ..load();
         }),
         // الإصدارات والنزاعات: تربط العقد والرقابة المالية بمسار النزاع

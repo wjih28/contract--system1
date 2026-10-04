@@ -97,18 +97,22 @@ service cloud.firestore {
       allow update: if signedIn()
         && myPhone() in resource.data.memberPhones
         && request.resource.data.createdBy == resource.data.createdBy
-        && unchanged('partnerPhones')
         && adminFieldsOk()
         && (
+          // 1) تحديث عادي
           (request.resource.data.members == resource.data.members
             && request.resource.data.memberPhones == resource.data.memberPhones
-            && unchanged('staff'))
-          || (request.resource.data.memberPhones == resource.data.memberPhones
             && unchanged('staff')
+            && unchanged('partnerPhones'))
+          // 2) إصدار عقد أحدث: يتغير جدول الحصص، وقد ينضم عضو مدعو (وارث) شريكاً، دون إزالة أحد
+          || (request.resource.data.memberPhones == resource.data.memberPhones
             && request.resource.data.contractVersion > resource.data.get('contractVersion', 0)
-            && request.resource.data.members.size() == resource.data.members.size())
+            && request.resource.data.members.size() >= resource.data.members.size()
+            && request.resource.data.get('partnerPhones', []).hasAll(resource.data.get('partnerPhones', [])))
+          // 3) إدارة الموظفين وأفراد العائلة المدعوين (مسؤول النظام)
           || (isCompanyAdmin()
             && request.resource.data.members == resource.data.members
+            && unchanged('partnerPhones')
             && request.resource.data.memberPhones.hasAll(resource.data.get('partnerPhones', resource.data.memberPhones)))
         );
 
@@ -210,6 +214,58 @@ service cloud.firestore {
 
       match /alertStates/{aId} {
         allow read, create, update: if isCompanyMember(cid);
+        allow delete: if false;
+      }
+
+      // ───────────── الحوكمة العائلية (المرحلة 6) ─────────────
+      // مقيدة بالشركاء وأفراد العائلة المدعوين في شركة فعّلت الوحدة، ولا تُحذف سجلاتها
+      function isFamily(cid) {
+        return signedIn()
+          && companyData(cid).get('familyEnabled', false) == true
+          && myPhone() in companyData(cid).get('familyPhones', []);
+      }
+
+      match /constitution/{x} {
+        allow read, create: if isFamily(cid);
+        // الإصدار الساري أو المؤرشف لا يتغير نصه؛ تتغير حالته فقط
+        allow update: if isFamily(cid)
+          && (resource.data.status == 'draft' || resource.data.status == 'pendingApproval'
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if false;
+      }
+
+      match /familyPeople/{x} {
+        allow read, create, update: if isFamily(cid);
+        allow delete: if false;
+      }
+
+      match /deeds/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid) && request.resource.data.shares == resource.data.shares;
+        allow delete: if false;
+      }
+
+      // التوزيع المعتمد لا يُعاد حسابه: المبالغ ثابتة بعد الإنشاء
+      match /distributions/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid)
+          && request.resource.data.allocations == resource.data.allocations
+          && request.resource.data.available == resource.data.available;
+        allow delete: if false;
+      }
+
+      match /succession/{x} {
+        allow read, create, update: if isFamily(cid);
+        allow delete: if false;
+      }
+
+      // القرار العائلي: الأوزان والعتبة ثابتة منذ فتحه، والأصوات تُضاف ولا تُحذف
+      match /familyDecisions/{x} {
+        allow read, create: if isFamily(cid);
+        allow update: if isFamily(cid)
+          && request.resource.data.weights == resource.data.weights
+          && request.resource.data.threshold == resource.data.threshold
+          && resource.data.status == 'open';
         allow delete: if false;
       }
 

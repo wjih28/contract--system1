@@ -4,7 +4,7 @@ import 'admin.dart';
 import 'questionnaire.dart';
 
 /// البوابات الأربع في المنصة
-enum Portal { partner, admin, operations, professional }
+enum Portal { partner, admin, operations, professional, family }
 
 extension PortalX on Portal {
   String get label => switch (this) {
@@ -12,6 +12,7 @@ extension PortalX on Portal {
         Portal.admin => 'إدارة النظام',
         Portal.operations => 'التشغيل والحوكمة',
         Portal.professional => 'الأطراف المهنية',
+        Portal.family => 'الحوكمة العائلية',
       };
 
   IconData get icon => switch (this) {
@@ -19,6 +20,7 @@ extension PortalX on Portal {
         Portal.admin => Icons.admin_panel_settings_rounded,
         Portal.operations => Icons.business_center_rounded,
         Portal.professional => Icons.work_history_rounded,
+        Portal.family => Icons.family_restroom_rounded,
       };
 }
 
@@ -34,6 +36,7 @@ enum CompanyRole {
   lawyer,
   accountant,
   witness,
+  familyMember,
 }
 
 extension CompanyRoleX on CompanyRole {
@@ -48,6 +51,7 @@ extension CompanyRoleX on CompanyRole {
         CompanyRole.lawyer => 'محامٍ',
         CompanyRole.accountant => 'محاسب',
         CompanyRole.witness => 'شاهد',
+        CompanyRole.familyMember => 'فرد من العائلة',
       };
 
   Portal get portal => switch (this) {
@@ -58,6 +62,7 @@ extension CompanyRoleX on CompanyRole {
         CompanyRole.departmentManager =>
           Portal.operations,
         CompanyRole.lawyer || CompanyRole.accountant || CompanyRole.witness => Portal.professional,
+        CompanyRole.familyMember => Portal.family,
       };
 
   bool get isPartner => this == CompanyRole.managingPartner || this == CompanyRole.partner;
@@ -119,6 +124,13 @@ enum AppModule {
   proArchive,
   // المراجعات المهنية من جهة الشركة (الشركاء ومسؤول النظام)
   professionalReviews,
+  // الحوكمة العائلية
+  familyDashboard,
+  familyConstitution,
+  familyTree,
+  familyDistribution,
+  familySuccession,
+  familyDecisions,
 }
 
 extension AppModuleX on AppModule {
@@ -172,6 +184,12 @@ extension AppModuleX on AppModule {
         AppModule.proComments => 'التعليقات',
         AppModule.proArchive => 'أرشيف المستندات',
         AppModule.professionalReviews => 'المراجعات المهنية',
+        AppModule.familyDashboard => 'لوحة العائلة',
+        AppModule.familyConstitution => 'الدستور العائلي',
+        AppModule.familyTree => 'العائلة والورثة',
+        AppModule.familyDistribution => 'توزيع الأرباح',
+        AppModule.familySuccession => 'الخلافة',
+        AppModule.familyDecisions => 'القرارات العائلية',
       };
 
   IconData get icon => switch (this) {
@@ -224,6 +242,12 @@ extension AppModuleX on AppModule {
         AppModule.proComments => Icons.forum_rounded,
         AppModule.proArchive => Icons.inventory_2_rounded,
         AppModule.professionalReviews => Icons.rate_review_rounded,
+        AppModule.familyDashboard => Icons.family_restroom_rounded,
+        AppModule.familyConstitution => Icons.menu_book_rounded,
+        AppModule.familyTree => Icons.account_tree_rounded,
+        AppModule.familyDistribution => Icons.volunteer_activism_rounded,
+        AppModule.familySuccession => Icons.swap_horiz_rounded,
+        AppModule.familyDecisions => Icons.how_to_vote_outlined,
       };
 
   /// وحدات مشتركة تظهر في أي بوابة لمن يملك صلاحيتها
@@ -271,9 +295,26 @@ extension AppModuleX on AppModule {
         AppModule.proComments ||
         AppModule.proArchive =>
           Portal.professional,
+        AppModule.familyDashboard ||
+        AppModule.familyConstitution ||
+        AppModule.familyTree ||
+        AppModule.familyDistribution ||
+        AppModule.familySuccession ||
+        AppModule.familyDecisions =>
+          Portal.family,
         _ => Portal.partner,
       };
 }
+
+/// وحدات الحوكمة العائلية: تظهر للشركاء المؤسسين وأفراد العائلة المدعوين، وللشركة العائلية فقط
+const kFamilyModules = {
+  AppModule.familyDashboard,
+  AppModule.familyConstitution,
+  AppModule.familyTree,
+  AppModule.familyDistribution,
+  AppModule.familySuccession,
+  AppModule.familyDecisions,
+};
 
 /// صلاحيات الوصول حسب الدور. تُراجع بعد الدخول، فالدخول وحده لا يمنح حقاً في الشركة.
 class Permissions {
@@ -297,6 +338,7 @@ class Permissions {
       AppModule.opsReports,
       AppModule.partnerReports,
       AppModule.professionalReviews,
+      ...kFamilyModules,
       AppModule.dashboard,
       AppModule.partners,
       AppModule.establishment,
@@ -312,6 +354,7 @@ class Permissions {
     CompanyRole.partner: {
       AppModule.partnerReports,
       AppModule.professionalReviews,
+      ...kFamilyModules,
       AppModule.dashboard,
       AppModule.partners,
       AppModule.establishment,
@@ -408,6 +451,7 @@ class Permissions {
       AppModule.profile,
     },
     CompanyRole.witness: {AppModule.professionalTasks, AppModule.profile},
+    CompanyRole.familyMember: {...kFamilyModules, AppModule.profile},
   };
 
   static Set<AppModule> modulesFor(Iterable<CompanyRole> roles) =>
@@ -425,6 +469,10 @@ class Permissions {
       Portal.admin => {PermAction.view, PermAction.print, PermAction.configure},
       Portal.operations => {PermAction.view, PermAction.add, PermAction.respond, PermAction.print},
       Portal.professional => {PermAction.view, PermAction.respond},
+      // في العائلة: الشريك المؤسس يضيف ويصوّت، والفرد المدعو يطّلع ويصوّت إن منحه الدستور وزناً
+      Portal.family => role.isPartner
+          ? {PermAction.view, PermAction.add, PermAction.respond, PermAction.print, PermAction.approve}
+          : {PermAction.view, PermAction.respond},
       Portal.partner => role.isPartner
           ? {PermAction.view, PermAction.add, PermAction.respond, PermAction.print, PermAction.approve}
           : {PermAction.view},
@@ -573,6 +621,9 @@ class Company {
   final String createdBy;
 
   // ───── الإدارة (المرحلة 4) ─────
+  /// الحوكمة العائلية مفعّلة (شركة عائلية): وحدة اختيارية يفعّلها الشركاء
+  bool familyEnabled;
+
   /// تخصيص مصفوفة الصلاحيات: الدور ← الوحدة ← الإجراءات
   Map<String, Map<String, List<String>>> permissions;
 
@@ -609,6 +660,7 @@ class Company {
     Map<String, Object?>? settings,
     Map<String, Map<String, dynamic>>? triage,
     Map<String, String>? lastSeen,
+    this.familyEnabled = false,
   })  : permissions = permissions ?? {},
         controlPoints = controlPoints ?? {},
         consents = consents ?? {},
@@ -660,6 +712,16 @@ class Company {
         'settings': settings,
         'triage': triage,
         'lastSeen': lastSeen,
+        'familyEnabled': familyEnabled,
+        // من يصل إلى بيانات العائلة (تتحقق منها قواعد الأمان): الشركاء وأفراد العائلة المدعوون
+        'familyPhones': familyEnabled
+            ? members
+                .where((m) => m.active && (m.isPartner || m.roles.contains(CompanyRole.familyMember)))
+                .map((m) => m.phone)
+                .where((p) => p.isNotEmpty)
+                .toSet()
+                .toList()
+            : <String>[],
         'contractVersion': contractVersion,
         'votingSettings': votingSettings.toJson(),
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -690,6 +752,7 @@ class Company {
         triage: Map<String, dynamic>.from(j['triage'] as Map? ?? {})
             .map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map))),
         lastSeen: Map<String, dynamic>.from(j['lastSeen'] as Map? ?? {}).map((k, v) => MapEntry(k, '$v')),
+        familyEnabled: j['familyEnabled'] as bool? ?? false,
       );
 
   static Map<String, Map<String, List<String>>> _nested(Object? raw) =>
